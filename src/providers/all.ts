@@ -27,6 +27,8 @@ import { cinemaosEmbeds } from './embeds/cinemaos';
 import { closeLoadScraper } from './embeds/closeload';
 import { madplayBaseEmbed, madplayNsapiEmbed, madplayNsapiVidFastEmbed, madplayRoperEmbed } from './embeds/madplay';
 import { mp4hydraServer1Scraper, mp4hydraServer2Scraper } from './embeds/mp4hydra';
+import { myanimedubScraper } from './embeds/myanimedub';
+import { myanimesubScraper } from './embeds/myanimesub';
 import { ridooScraper } from './embeds/ridoo';
 import { streamtapeLatinoScraper, streamtapeScraper } from './embeds/streamtape';
 import { streamvidScraper } from './embeds/streamvid';
@@ -76,6 +78,7 @@ import { iosmirrorScraper } from './sources/iosmirror';
 import { iosmirrorPVScraper } from './sources/iosmirrorpv';
 import { lookmovieScraper } from './sources/lookmovie';
 import { madplayScraper } from './sources/madplay';
+import { myanimeScraper } from './sources/myanime';
 import { nunflixScraper } from './sources/nunflix';
 import { rgshowsScraper } from './sources/rgshows';
 import { ridooMoviesScraper } from './sources/ridomovies';
@@ -99,6 +102,7 @@ export function gatherAllSources(): Array<Sourcerer> {
     insertunitScraper,
     soaperTvScraper,
     autoembedScraper,
+    myanimeScraper,
     tugaflixScraper,
     ee3Scraper,
     fsharetvScraper,
@@ -187,5 +191,7 @@ export function gatherAllEmbeds(): Array<Embed> {
     vidnestAllmoviesEmbed,
     vidnestFlixhqEmbed,
     vidnestOfficialEmbed,
+    myanimesubScraper,
+    myanimedubScraper,
   ];
 }
