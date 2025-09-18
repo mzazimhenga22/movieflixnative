@@ -108,3 +108,82 @@ export async function getAnilistIdFromMedia(ctx: ScrapeContext, media: MovieMedi
   cache.set(key, anilistId);
   return anilistId;
 }
+const anilistTitlesQuery = `
+query ($id: Int) {
+  Media(id: $id, type: ANIME) {
+    title {
+      romaji
+      english
+      native
+    }
+    synonyms
+  }
+}
+`;
+
+type AnilistTitlesResponse = {
+  data: {
+    Media: {
+      title: {
+        romaji: string;
+        english?: string;
+        native?: string;
+      };
+      synonyms: string[];
+    };
+  };
+};
+
+export async function getAnilistTitles(ctx: ScrapeContext, media: MovieMedia | ShowMedia): Promise<string[]> {
+  const id = await getAnilistIdFromMedia(ctx, media);
+  const res = await ctx.proxiedFetcher<AnilistTitlesResponse>('', {
+    baseUrl: 'https://graphql.anilist.co',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      query: anilistTitlesQuery,
+      variables: {
+        id,
+      },
+    }),
+  });
+
+  const titles = [
+    res.data.Media.title.romaji,
+    res.data.Media.title.english,
+    res.data.Media.title.native,
+    ...res.data.Media.synonyms,
+  ]
+    .filter((t): t is string => !!t)
+    .map((t) => t.toLowerCase());
+
+  return titles;
+}
+
+export async function getAnilistEnglishTitle(
+  ctx: ScrapeContext,
+  media: MovieMedia | ShowMedia,
+): Promise<string | null> {
+  const id = await getAnilistIdFromMedia(ctx, media);
+  const res = await ctx.proxiedFetcher<AnilistTitlesResponse>('', {
+    baseUrl: 'https://graphql.anilist.co',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      query: anilistTitlesQuery,
+      variables: {
+        id,
+      },
+    }),
+  });
+
+  const englishTitle = res.data.Media.title.english;
+
+  return englishTitle ? englishTitle.toLowerCase() : null;
+}
