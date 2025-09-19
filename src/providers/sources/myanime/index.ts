@@ -138,8 +138,8 @@ const universalScraper = async (ctx: MovieScrapeContext): Promise<SourcererOutpu
 
 export const myanimeScraper = makeSourcerer({
   id: 'myanime',
-  name: 'MyAnime 🌸',
-  rank: 810,
+  name: 'MyAnime',
+  rank: 113,
   flags: [flags.CORS_ALLOWED],
   scrapeMovie: universalScraper,
   scrapeShow: showScraper,
