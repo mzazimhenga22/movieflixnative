@@ -78,7 +78,7 @@ import { iosmirrorScraper } from './sources/iosmirror';
 import { iosmirrorPVScraper } from './sources/iosmirrorpv';
 import { lookmovieScraper } from './sources/lookmovie';
 import { madplayScraper } from './sources/madplay';
-import { myanimeScraper } from './sources/myanime/myanime';
+import { myanimeScraper } from './sources/myanime';
 import { nunflixScraper } from './sources/nunflix';
 import { rgshowsScraper } from './sources/rgshows';
 import { ridooMoviesScraper } from './sources/ridomovies';
