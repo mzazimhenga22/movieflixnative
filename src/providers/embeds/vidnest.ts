@@ -8,6 +8,7 @@ export const vidnestHollymoviehdEmbed = makeEmbed({
   id: 'vidnest-hollymoviehd',
   name: 'HollyMovie',
   rank: 104,
+  disabled: true,
   async scrape(ctx) {
     const serverStreams = await ctx.proxiedFetcher<any>(ctx.url);
     if (!serverStreams.success || !serverStreams.sources) throw new NotFoundError('No streams found');
@@ -35,6 +36,7 @@ export const vidnestAllmoviesEmbed = makeEmbed({
   id: 'vidnest-allmovies',
   name: 'AllMovies (Hindi)',
   rank: 103,
+  disabled: true,
   async scrape(ctx) {
     const serverStreams = await ctx.proxiedFetcher<any>(ctx.url);
     if (!serverStreams.streams) throw new NotFoundError('No streams found');

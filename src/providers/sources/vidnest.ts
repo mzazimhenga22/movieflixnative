@@ -32,6 +32,7 @@ const vidnestScraper = makeSourcerer({
   id: 'vidnest',
   name: 'Vidnest',
   rank: 130,
+  disabled: true,
   flags: [flags.CORS_ALLOWED],
   scrapeMovie: (ctx: MovieScrapeContext) => scrape(ctx, 'movie'),
   scrapeShow: (ctx: ShowScrapeContext) => scrape(ctx, 'tv'),
