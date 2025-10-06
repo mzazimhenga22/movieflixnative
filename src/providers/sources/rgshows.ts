@@ -3,11 +3,11 @@ import { NotFoundError } from '@/utils/errors';
 
 import { SourcererOutput, makeSourcerer } from '../base';
 
-const baseUrl = 'api.rgshows.me';
+const baseUrl = 'api.rgshows.ru';
 
 const headers = {
-  referer: 'https://rgshows.me/',
-  origin: 'https://rgshows.me',
+  referer: 'https://rgshows.ru/',
+  origin: 'https://rgshows.ru',
   host: baseUrl,
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -36,8 +36,8 @@ async function comboScraper(ctx: ShowScrapeContext | MovieScrapeContext): Promis
   const m3u8Headers = {
     ...headers,
     host: streamHost,
-    origin: 'https://www.rgshows.me',
-    referer: 'https://www.rgshows.me/',
+    origin: 'https://www.rgshows.ru',
+    referer: 'https://www.rgshows.ru/',
   };
 
   ctx.progress(100);
