@@ -63,6 +63,7 @@ export const closeLoadScraper = makeEmbed({
   id: 'closeload',
   name: 'CloseLoad',
   rank: 106,
+  disabled: true,
   async scrape(ctx) {
     const baseUrl = new URL(ctx.url).origin;
 
