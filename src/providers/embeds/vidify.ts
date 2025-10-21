@@ -132,7 +132,7 @@ export function makeVidifyEmbed(id: string, rank: number = 100) {
         playlist = decodeURIComponent(playlistUrl);
       } else {
         console.log(`Found normal stream: `, playlistUrl);
-        playlist = createM3U8ProxyUrl(decodeURIComponent(playlistUrl), streamHeaders);
+        playlist = createM3U8ProxyUrl(decodeURIComponent(playlistUrl), ctx.features, streamHeaders);
       }
 
       ctx.progress(100);

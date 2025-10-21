@@ -48,7 +48,8 @@ export const madplayBaseEmbed = makeEmbed({
         {
           id: 'primary',
           type: 'hls',
-          playlist: createM3U8ProxyUrl(stream.file, headers),
+          playlist: createM3U8ProxyUrl(stream.file, ctx.features, headers),
+          headers,
           flags: [flags.CORS_ALLOWED],
           captions: [],
         },
@@ -92,7 +93,8 @@ export const madplayNsapiEmbed = makeEmbed({
         {
           id: 'primary',
           type: 'hls',
-          playlist: createM3U8ProxyUrl(stream.url, stream.headers || headers),
+          playlist: createM3U8ProxyUrl(stream.url, ctx.features, stream.headers || headers),
+          headers: stream.headers || headers,
           flags: [flags.CORS_ALLOWED],
           captions: [],
         },
@@ -136,7 +138,8 @@ export const madplayRoperEmbed = makeEmbed({
         {
           id: 'primary',
           type: 'hls',
-          playlist: createM3U8ProxyUrl(stream.url, stream.headers || headers),
+          playlist: createM3U8ProxyUrl(stream.url, ctx.features, stream.headers || headers),
+          headers: stream.headers || headers,
           flags: [flags.CORS_ALLOWED],
           captions: [],
         },
@@ -180,7 +183,8 @@ export const madplayNsapiVidFastEmbed = makeEmbed({
         {
           id: 'primary',
           type: 'hls',
-          playlist: createM3U8ProxyUrl(stream.url, stream.headers || headers),
+          playlist: createM3U8ProxyUrl(stream.url, ctx.features, stream.headers || headers),
+          headers: stream.headers || headers,
           flags: [flags.CORS_ALLOWED],
           captions: [],
         },

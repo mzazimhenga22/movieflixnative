@@ -224,7 +224,8 @@ function embed(provider: { id: string; name: string; rank: number }) {
           {
             id: 'primary',
             type: 'hls',
-            playlist: createM3U8ProxyUrl(videoUrl, videoHeaders),
+            playlist: createM3U8ProxyUrl(videoUrl, ctx.features, videoHeaders),
+            headers: videoHeaders,
             flags: [flags.CORS_ALLOWED],
             captions: [],
           },

@@ -123,7 +123,8 @@ export function makeCinemaOSHexaEmbed(id: string, rank: number = 100) {
           {
             id: 'primary',
             type: 'hls',
-            playlist: createM3U8ProxyUrl(directUrl, headers),
+            playlist: createM3U8ProxyUrl(directUrl, ctx.features, headers),
+            headers,
             flags: [flags.CORS_ALLOWED],
             captions: [],
           },

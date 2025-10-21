@@ -37,7 +37,8 @@ function makeVidSrcEmbed(provider: { id: string; name: string; rank: number }) {
             {
               id: 'primary',
               type: 'hls',
-              playlist: createM3U8ProxyUrl(ctx.url, headers),
+              playlist: createM3U8ProxyUrl(ctx.url, ctx.features, headers),
+              headers,
               flags: [flags.CORS_ALLOWED],
               captions: [],
             },

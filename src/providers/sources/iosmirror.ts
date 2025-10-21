@@ -117,7 +117,7 @@ const universalScraper = async (ctx: ShowScrapeContext | MovieScrapeContext): Pr
     cookie: makeCookieHeader({ hd: 'on' }),
   };
 
-  const playlist = createM3U8ProxyUrl(`${baseUrl}${autoFile}`, headers);
+  const playlist = createM3U8ProxyUrl(`${baseUrl}${autoFile}`, ctx.features, headers);
   ctx.progress(90);
 
   return {
@@ -127,6 +127,7 @@ const universalScraper = async (ctx: ShowScrapeContext | MovieScrapeContext): Pr
         id: 'primary',
         playlist,
         type: 'hls',
+        headers,
         flags: [flags.CORS_ALLOWED],
         captions: [],
       },

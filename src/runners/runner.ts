@@ -52,6 +52,7 @@ export async function runAllProviders(list: ProviderList, ops: ProviderRunnerOpt
   const contextBase: ScrapeContext = {
     fetcher: ops.fetcher,
     proxiedFetcher: ops.proxiedFetcher,
+    features: ops.features,
     progress(val) {
       ops.events?.update?.({
         id: lastId,

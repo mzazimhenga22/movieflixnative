@@ -94,7 +94,8 @@ export const turbovidScraper = makeEmbed({
         {
           type: 'hls',
           id: 'primary',
-          playlist: createM3U8ProxyUrl(playlist, streamHeaders),
+          playlist: createM3U8ProxyUrl(playlist, ctx.features, streamHeaders),
+          headers: streamHeaders,
           flags: [],
           captions: [],
         },

@@ -1,4 +1,4 @@
-import { flags } from '@/entrypoint/utils/targets';
+import { FeatureMap, flags } from '@/entrypoint/utils/targets';
 import { Stream } from '@/providers/streams';
 
 // Default proxy URL for general purpose proxying
@@ -67,10 +67,18 @@ export function setupProxy(stream: Stream): Stream {
 /**
  * Creates a proxied M3U8 URL using the configured M3U8 proxy
  * @param url - The original M3U8 URL to proxy
+ * @param features - Feature map to determine if local proxy (extension/native) is available
  * @param headers - Headers to include with the request
- * @returns The proxied M3U8 URL
+ * @returns The proxied M3U8 URL or original URL if local proxy is available
  */
-export function createM3U8ProxyUrl(url: string, headers: Record<string, string> = {}): string {
+export function createM3U8ProxyUrl(url: string, features?: FeatureMap, headers: Record<string, string> = {}): string {
+  // If we have features and local proxy is available (no CORS restrictions), return original URL
+  // The stream headers will handle the proxying through the extension/native environment
+  if (features && !features.requires.includes(flags.CORS_ALLOWED)) {
+    return url;
+  }
+
+  // Otherwise, use the external M3U8 proxy
   const encodedUrl = encodeURIComponent(url);
   const encodedHeaders = encodeURIComponent(JSON.stringify(headers));
   return `${CONFIGURED_M3U8_PROXY_URL}/m3u8-proxy?url=${encodedUrl}${headers ? `&headers=${encodedHeaders}` : ''}`;

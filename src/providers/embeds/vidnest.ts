@@ -19,7 +19,8 @@ export const vidnestHollymoviehdEmbed = makeEmbed({
         streams.push({
           id: `hollymoviehd-${source.label}`,
           type: 'hls',
-          playlist: createM3U8ProxyUrl(source.file),
+          playlist: createM3U8ProxyUrl(source.file, ctx.features),
+          headers: {},
           flags: [flags.CORS_ALLOWED],
           captions: [],
         } as HlsBasedStream);

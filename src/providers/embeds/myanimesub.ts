@@ -33,9 +33,12 @@ export const myanimesubScraper = makeEmbed({
         {
           id: 'sub',
           type: 'hls',
-          playlist: createM3U8ProxyUrl(streamData.results.streamingLink.link.file, {
+          playlist: createM3U8ProxyUrl(streamData.results.streamingLink.link.file, ctx.features, {
             Referer: 'https://rapid-cloud.co/',
           }),
+          headers: {
+            Referer: 'https://rapid-cloud.co/',
+          },
           flags: [flags.CORS_ALLOWED],
           captions:
             (streamData.results.streamingLink.tracks

@@ -34,7 +34,8 @@ export const viperScraper = makeEmbed({
         {
           type: 'hls',
           id: 'primary',
-          playlist: createM3U8ProxyUrl(playlistUrl, headers),
+          playlist: createM3U8ProxyUrl(playlistUrl, ctx.features, headers),
+          headers,
           flags: [flags.CORS_ALLOWED],
           captions: [],
         },
