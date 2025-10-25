@@ -86,6 +86,7 @@ import { ridooMoviesScraper } from './sources/ridomovies';
 import { slidemoviesScraper } from './sources/slidemovies';
 import { soaperTvScraper } from './sources/soapertv';
 import { streamboxScraper } from './sources/streambox';
+import { turbovidSourceScraper } from './sources/turbovid';
 import { vidapiClickScraper } from './sources/vidapiclick';
 import { vidifyScraper } from './sources/vidify';
 import vidnestScraper from './sources/vidnest';
@@ -132,6 +133,7 @@ export function gatherAllSources(): Array<Sourcerer> {
     vidnestScraper,
     animetsuScraper,
     lookmovieScraper,
+    turbovidSourceScraper,
   ];
 }
 
