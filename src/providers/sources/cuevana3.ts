@@ -115,7 +115,7 @@ async function fetchTitleSubstitutes(): Promise<Record<string, string>> {
 async function comboScraper(ctx: ShowScrapeContext | MovieScrapeContext): Promise<SourcererOutput> {
   const mediaType = ctx.media.type;
   const tmdbId = ctx.media.tmdbId;
-  const apiKey = '7604525319adb2db8e7e841cb98e9217';
+  const apiKey = 'a500049f3e06109fe3e8289b06cf5685';
 
   if (!tmdbId) {
     throw new NotFoundError('TMDB ID is required to fetch the title in Spanish');
@@ -228,7 +228,7 @@ export const cuevana3Scraper = makeSourcerer({
   id: 'cuevana3',
   name: 'Cuevana3',
   rank: 80,
-  disabled: true,
+  disabled: false,
   flags: [flags.CORS_ALLOWED],
   scrapeMovie: comboScraper,
   scrapeShow: comboScraper,
