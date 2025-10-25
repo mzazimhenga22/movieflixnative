@@ -1,5 +1,6 @@
 import { Embed, Sourcerer } from '@/providers/base';
 import { doodScraper } from '@/providers/embeds/dood';
+import { filemoonScraper } from '@/providers/embeds/filemoon';
 import { mixdropScraper } from '@/providers/embeds/mixdrop';
 import { turbovidScraper } from '@/providers/embeds/turbovid';
 import { upcloudScraper } from '@/providers/embeds/upcloud';
@@ -193,5 +194,6 @@ export function gatherAllEmbeds(): Array<Embed> {
     vidnestOfficialEmbed,
     myanimesubScraper,
     myanimedubScraper,
+    filemoonScraper,
   ];
 }
