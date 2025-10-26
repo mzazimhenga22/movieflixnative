@@ -40,6 +40,7 @@ import {
   streamwishSpanishScraper,
 } from './embeds/streamwish';
 import { vidCloudScraper } from './embeds/vidcloud';
+import { vidhideEnglishScraper, vidhideLatinoScraper, vidhideSpanishScraper } from './embeds/vidhide';
 import { vidifyEmbeds } from './embeds/vidify';
 import {
   vidnestAllmoviesEmbed,
@@ -81,6 +82,7 @@ import { lookmovieScraper } from './sources/lookmovie';
 import { madplayScraper } from './sources/madplay';
 import { myanimeScraper } from './sources/myanime';
 import { nunflixScraper } from './sources/nunflix';
+import { pelisplushdScraper } from './sources/pelisplushd';
 import { rgshowsScraper } from './sources/rgshows';
 import { ridooMoviesScraper } from './sources/ridomovies';
 import { slidemoviesScraper } from './sources/slidemovies';
@@ -134,6 +136,7 @@ export function gatherAllSources(): Array<Sourcerer> {
     animetsuScraper,
     lookmovieScraper,
     turbovidSourceScraper,
+    pelisplushdScraper,
   ];
 }
 
@@ -197,5 +200,8 @@ export function gatherAllEmbeds(): Array<Embed> {
     myanimesubScraper,
     myanimedubScraper,
     filemoonScraper,
+    vidhideLatinoScraper,
+    vidhideSpanishScraper,
+    vidhideEnglishScraper,
   ];
 }
