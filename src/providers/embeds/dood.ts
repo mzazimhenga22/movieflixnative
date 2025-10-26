@@ -180,7 +180,7 @@ export const doodScraper = makeEmbed({
         {
           id: 'primary',
           type: 'file',
-          flags: [flags.CORS_ALLOWED],
+          flags: [], // I dont think it will work without headers
           captions: [],
           qualities: {
             unknown: {
