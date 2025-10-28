@@ -33,7 +33,7 @@ export const filelionsScraper = makeEmbed({
     const linksMatch = unpacked.match(/var links=(\{.*?\})/);
     if (!linksMatch) throw new NotFoundError('Links object not found');
 
-    const links = eval(`(${linksMatch[1]})`);
+    const links = JSON.parse(linksMatch[1]);
     Object.keys(links).forEach((key) => {
       if (links[key].startsWith('/stream/')) {
         links[key] = `https://dinisglows.com${links[key]}`;
