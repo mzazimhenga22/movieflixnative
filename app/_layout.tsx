@@ -33,11 +33,13 @@ export default function RootLayout() {
       style={styles.container}
     >
       <ThemeProvider value={colorScheme === 'dark' ? MyDarkTheme : MyLightTheme}>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="details/[id]" options={{ headerShown: false, presentation: 'modal' }} />
+        {/* ✅ Hide all headers by default */}
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="details/[id]" options={{ presentation: 'modal' }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
+
         <StatusBar style="light" />
       </ThemeProvider>
     </LinearGradient>

@@ -1,5 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  ScrollView,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -28,12 +35,18 @@ const ProfileScreen = () => {
     <ScreenWrapper>
       <StatusBar style="light" translucent={false} />
       <ScrollView contentContainerStyle={styles.container}>
+
         <View style={styles.inner}>
           <View style={styles.profileHeader}>
             <Image source={{ uri: user.avatar }} style={styles.avatar} />
             <Text style={styles.name}>{user.name}</Text>
-            <Text style={styles.memberSince}>Member since {user.memberSince}</Text>
-            <TouchableOpacity style={styles.editProfileButton} onPress={handleEditProfile}>
+            <Text style={styles.memberSince}>
+              Member since {user.memberSince}
+            </Text>
+            <TouchableOpacity
+              style={styles.editProfileButton}
+              onPress={handleEditProfile}
+            >
               <Text style={styles.editProfileButtonText}>Edit Profile</Text>
             </TouchableOpacity>
           </View>
@@ -56,7 +69,7 @@ const ProfileScreen = () => {
           <View style={styles.favoriteGenresContainer}>
             <Text style={styles.sectionTitle}>Favorite Genres</Text>
             <View style={styles.genresList}>
-              {user.favoriteGenres.map(genre => (
+              {user.favoriteGenres.map((genre) => (
                 <View key={genre} style={styles.genreTag}>
                   <Text style={styles.genreText}>{genre}</Text>
                 </View>
@@ -69,16 +82,15 @@ const ProfileScreen = () => {
               <Ionicons name="settings-outline" size={24} color="white" />
               <Text style={styles.actionText}>Settings</Text>
             </TouchableOpacity>
+
             <TouchableOpacity style={styles.actionItem}>
               <Ionicons name="help-circle-outline" size={24} color="white" />
               <Text style={styles.actionText}>Help & Support</Text>
             </TouchableOpacity>
+
             <TouchableOpacity
               style={styles.actionItem}
-              onPress={() => {
-                // Example: go back to Home with replace so Home becomes first route (or navigate)
-                router.replace('/');
-              }}
+              onPress={() => router.replace('/')}
             >
               <Ionicons name="log-out-outline" size={24} color="red" />
               <Text style={[styles.actionText, { color: 'red' }]}>Logout</Text>
@@ -93,13 +105,23 @@ const ProfileScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
-    backgroundColor: '#000', // opaque background
+    backgroundColor: '#000',
     paddingHorizontal: 20,
     paddingTop: 30,
     paddingBottom: 50,
   },
+  backButton: {
+    position: 'absolute',
+    top: 30,
+    left: 15,
+    zIndex: 10,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20,
+    padding: 8,
+  },
   inner: {
     flex: 1,
+    marginTop: 50,
   },
   profileHeader: {
     alignItems: 'center',
@@ -180,9 +202,7 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
   },
-  actionsContainer: {
-    // nothing extra required
-  },
+  actionsContainer: {},
   actionItem: {
     flexDirection: 'row',
     alignItems: 'center',

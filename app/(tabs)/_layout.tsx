@@ -1,6 +1,6 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
 
 export default function TabLayout() {
@@ -43,11 +43,29 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="downloads"
+        name="recommended"
         options={{
-          title: 'Downloads',
+          title: 'For You',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'download' : 'download-outline'} size={24} color={color} />
+            <Ionicons name={focused ? 'heart' : 'heart-outline'} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="live"
+        options={{
+          title: 'Live',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'radio' : 'radio-outline'} size={24} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="movie-match"
+        options={{
+          title: 'Match',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'people' : 'people-outline'} size={24} color={color} />
           ),
         }}
       />

@@ -1,13 +1,16 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
-import ScreenWrapper from '../../components/ScreenWrapper';
+
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import FeatureCard from '../components/interactive/FeatureCard';
 import { BlurView } from 'expo-blur';
+import { useRouter } from 'expo-router';
+import React from 'react';
+import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import ScreenWrapper from '../../components/ScreenWrapper';
+import FeatureCard from '../components/interactive/FeatureCard';
 
 const { width } = Dimensions.get('window');
 
 const InteractiveScreen = () => {
+  const router = useRouter();
   return (
     <ScreenWrapper>
       <ScrollView contentContainerStyle={styles.scrollViewContent}>
@@ -98,7 +101,7 @@ const InteractiveScreen = () => {
             title="Social Reactions"
             description="Share live reactions during movies with friends and other viewers."
             isLarge={true}
-            onPress={() => console.log('Social Reactions')}
+            onPress={() => router.push('/social-feed')}
           />
         </View>
       </ScrollView>
