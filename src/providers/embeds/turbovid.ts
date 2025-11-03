@@ -1,3 +1,4 @@
+import { flags } from '@/entrypoint/utils/targets';
 import { makeEmbed } from '@/providers/base';
 import { createM3U8ProxyUrl } from '@/utils/proxy';
 
@@ -96,7 +97,7 @@ export const turbovidScraper = makeEmbed({
           id: 'primary',
           playlist: createM3U8ProxyUrl(playlist, ctx.features, streamHeaders),
           headers: streamHeaders,
-          flags: [],
+          flags: [flags.CORS_ALLOWED],
           captions: [],
         },
       ],
