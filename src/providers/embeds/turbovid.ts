@@ -1,6 +1,5 @@
 import { flags } from '@/entrypoint/utils/targets';
 import { makeEmbed } from '@/providers/base';
-import { createM3U8ProxyUrl } from '@/utils/proxy';
 
 // Thanks to Paradox_77 for helping with the decryption
 function hexToChar(hex: string): string {
@@ -95,8 +94,8 @@ export const turbovidScraper = makeEmbed({
         {
           type: 'hls',
           id: 'primary',
-          playlist: createM3U8ProxyUrl(playlist, ctx.features, streamHeaders),
-          headers: streamHeaders,
+          playlist,
+          preferredHeaders: streamHeaders,
           flags: [flags.CORS_ALLOWED],
           captions: [],
         },
