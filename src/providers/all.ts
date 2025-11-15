@@ -81,6 +81,7 @@ import { iosmirrorScraper } from './sources/iosmirror';
 import { iosmirrorPVScraper } from './sources/iosmirrorpv';
 import { lookmovieScraper } from './sources/lookmovie';
 import { madplayScraper } from './sources/madplay';
+import { movies4fScraper } from './sources/movies4f';
 import { myanimeScraper } from './sources/myanime';
 import { nunflixScraper } from './sources/nunflix';
 import { pelisplushdScraper } from './sources/pelisplushd';
@@ -140,6 +141,7 @@ export function gatherAllSources(): Array<Sourcerer> {
     turbovidSourceScraper,
     pelisplushdScraper,
     primewireScraper,
+    movies4fScraper,
   ];
 }
 
