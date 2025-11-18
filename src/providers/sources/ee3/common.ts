@@ -1,6 +1,4 @@
-export const useAltEndpoint: boolean = false;
-
-export const baseUrl = useAltEndpoint ? 'https://rips.cc' : 'https://ee3.me';
+export const apiBaseUrl = 'https://borg.rips.cc';
 
 export const username = '_sf_';
 
