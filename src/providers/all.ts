@@ -98,6 +98,7 @@ import vidnestScraper from './sources/vidnest';
 import { warezcdnScraper } from './sources/warezcdn';
 import { wecimaScraper } from './sources/wecima';
 import { zunimeScraper } from './sources/zunime';
+import { debridScraper } from './sources/debrid';
 
 export function gatherAllSources(): Array<Sourcerer> {
   // all sources are gathered here
@@ -142,6 +143,7 @@ export function gatherAllSources(): Array<Sourcerer> {
     pelisplushdScraper,
     primewireScraper,
     movies4fScraper,
+    debridScraper,
   ];
 }
 
