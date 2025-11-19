@@ -75,6 +75,7 @@ import { animetsuScraper } from './sources/animetsu';
 import { cinemaosScraper } from './sources/cinemaos';
 import { coitusScraper } from './sources/coitus';
 import { cuevana3Scraper } from './sources/cuevana3';
+import { debridScraper } from './sources/debrid';
 import { embedsuScraper } from './sources/embedsu';
 import { hdRezkaScraper } from './sources/hdrezka';
 import { iosmirrorScraper } from './sources/iosmirror';
@@ -98,7 +99,6 @@ import vidnestScraper from './sources/vidnest';
 import { warezcdnScraper } from './sources/warezcdn';
 import { wecimaScraper } from './sources/wecima';
 import { zunimeScraper } from './sources/zunime';
-import { debridScraper } from './sources/debrid';
 
 export function gatherAllSources(): Array<Sourcerer> {
   // all sources are gathered here
