@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 import { flags } from '@/entrypoint/utils/targets';
 import { SourcererOutput, makeSourcerer } from '@/providers/base';
 import { MovieScrapeContext, ShowScrapeContext } from '@/utils/context';
@@ -110,7 +111,15 @@ async function comboScraper(ctx: ShowScrapeContext | MovieScrapeContext): Promis
   } else {
     torrentioUrl += `movie/${ctx.media.imdbId}.json`;
   }
-  const torrentioStreams: torrentioResponse = (await ctx.proxiedFetcher(torrentioUrl)).streams;
+  const torrentioData = (await ctx.proxiedFetcher(torrentioUrl)) as torrentioResponse;
+
+  const torrentioStreams = torrentioData?.streams || [];
+  if (torrentioStreams.length === 0) {
+    console.log('No torrents found', torrentioData);
+    throw new NotFoundError('No torrents found');
+  }
+
+  ctx.progress(33);
 
   const response: DebridParsedStream[] = await ctx.proxiedFetcher('https://torrent-parse.pstream.mov/', {
     method: 'POST',
@@ -119,6 +128,12 @@ async function comboScraper(ctx: ShowScrapeContext | MovieScrapeContext): Promis
     },
     body: JSON.stringify(torrentioStreams),
   });
+  if (response.length === 0) {
+    console.log('No streams found or parse failed!', response);
+    throw new NotFoundError('No streams found or parse failed!');
+  }
+
+  ctx.progress(66);
 
   // Group by quality, pick the most compatible stream for each
   const qualities: Partial<Record<'4k' | 1080 | 720 | 480 | 360 | 'unknown', { type: 'mp4'; url: string }>> = {};
@@ -161,6 +176,8 @@ async function comboScraper(ctx: ShowScrapeContext | MovieScrapeContext): Promis
     }
   }
 
+  ctx.progress(100);
+
   return {
     embeds: [],
     stream: [
@@ -179,7 +196,7 @@ export const debridScraper = makeSourcerer({
   id: 'debrid',
   name: 'Debrid',
   rank: 999,
-  disabled: true,
+  disabled: false,
   flags: [flags.CORS_ALLOWED],
   scrapeMovie: comboScraper,
   scrapeShow: comboScraper,

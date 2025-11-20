@@ -4,13 +4,15 @@ export type debridProviders = 'torbox' | 'real-debrid';
 export interface stremioStream {
   name: string;
   title: string;
-  url: string;
+  infoHash: string;
+  fileIdx: number;
   behaviorHints?: {
     bingeGroup: string;
     filename: string;
-    videoSize: number;
-    videoHash: string;
+    videoSize?: number;
+    videoHash?: string;
   };
+  sources?: string[];
 }
 
 export interface torrentioResponse {
