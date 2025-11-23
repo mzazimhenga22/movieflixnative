@@ -27,6 +27,7 @@ import {
 } from './embeds/autoembed';
 import { cinemaosEmbeds } from './embeds/cinemaos';
 import { closeLoadScraper } from './embeds/closeload';
+import { droploadScraper } from './embeds/dropload';
 import { filelionsScraper } from './embeds/filelions';
 import { madplayBaseEmbed, madplayNsapiEmbed, madplayNsapiVidFastEmbed, madplayRoperEmbed } from './embeds/madplay';
 import { mp4hydraServer1Scraper, mp4hydraServer2Scraper } from './embeds/mp4hydra';
@@ -213,5 +214,6 @@ export function gatherAllEmbeds(): Array<Embed> {
     vidhideSpanishScraper,
     vidhideEnglishScraper,
     filelionsScraper,
+    droploadScraper,
   ];
 }
