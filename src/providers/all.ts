@@ -75,6 +75,7 @@ import { zunimeEmbeds } from './embeds/zunime';
 import { EightStreamScraper } from './sources/8stream';
 import { animeflvScraper } from './sources/animeflv';
 import { animetsuScraper } from './sources/animetsu';
+import { cinehdplusScraper } from './sources/cinehdplus-es';
 import { cinemaosScraper } from './sources/cinemaos';
 import { coitusScraper } from './sources/coitus';
 import { cuevana3Scraper } from './sources/cuevana3';
@@ -147,6 +148,7 @@ export function gatherAllSources(): Array<Sourcerer> {
     primewireScraper,
     movies4fScraper,
     debridScraper,
+    cinehdplusScraper,
   ];
 }
 
