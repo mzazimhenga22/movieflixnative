@@ -42,6 +42,7 @@ import {
   streamwishLatinoScraper,
   streamwishSpanishScraper,
 } from './embeds/streamwish';
+import { supervideoScraper } from './embeds/supervideo';
 import { vidCloudScraper } from './embeds/vidcloud';
 import { vidhideEnglishScraper, vidhideLatinoScraper, vidhideSpanishScraper } from './embeds/vidhide';
 import { vidifyEmbeds } from './embeds/vidify';
@@ -215,5 +216,6 @@ export function gatherAllEmbeds(): Array<Embed> {
     vidhideEnglishScraper,
     filelionsScraper,
     droploadScraper,
+    supervideoScraper,
   ];
 }
