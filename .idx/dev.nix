@@ -3,21 +3,31 @@
 { pkgs, ... }: {
   # Which nixpkgs channel to use.
   channel = "stable-25.05";
+
   # Use https://search.nixos.org/packages to find packages
-  packages = [ pkgs.nodejs_20 ];
-  # Sets environment variables in the workspace
-  env = { EXPO_USE_FAST_RESOLVER = 1; };
+  packages = [ pkgs.nodejs_20 pkgs.jdk17 pkgs.supabase-cli ];
+
+  # Sets environment variables in the workspace (values must be strings)
+  env = {
+    EXPO_USE_FAST_RESOLVER = "1";
+    JAVA_HOME = "${pkgs.jdk17}";
+  };
+  
+  services.docker.enable = true;
+
   idx = {
     # Search for the extensions you want on https://open-vsx.org/ and use "publisher.id"
     extensions = [
       "msjsdiag.vscode-react-native"
     ];
+
     workspace = {
       # Runs when a workspace is first created with this `dev.nix` file
       onCreate = {
         install =
           "npm ci --prefer-offline --no-audit --no-progress --timing && npm i @expo/ngrok@^4.1.0";
       };
+
       # Runs when a workspace restarted
       onStart = {
         android = ''
@@ -28,6 +38,7 @@
         '';
       };
     };
+
     # Enable previews and customize configuration
     previews = {
       enable = true;

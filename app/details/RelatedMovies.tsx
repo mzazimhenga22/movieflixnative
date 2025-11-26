@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { IMAGE_BASE_URL } from '../../constants/api';
 import { Media } from '../../types';
-import { PulsePlaceholder } from './PulsePlaceholder';
+import PulsePlaceholder from './PulsePlaceholder'; // Corrected import
 
 interface Props {
   relatedMovies: Media[];

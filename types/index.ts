@@ -9,9 +9,17 @@ export interface Media {
   genre_ids?: number[];
   backdrop_path?: string; // Add this
   overview?: string;      // Add this
+  media_type?: 'movie' | 'tv';
 }
 
 export interface Genre {
   id: number;
   name: string;
+}
+
+export interface CastMember {
+  id: number;
+  name: string;
+  character: string;
+  profile_path: string;
 }

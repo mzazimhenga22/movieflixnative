@@ -1,0 +1,166 @@
+// app/components/BottomNav.tsx
+import React from 'react';
+import {
+  Platform,
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+
+type Props = BottomTabBarProps & {
+  insetsBottom: number;
+  isDark: boolean;
+};
+
+export default function BottomNav({ insetsBottom, isDark, state, navigation }: Props): React.ReactElement {
+  const bottomOffset = Platform.OS === 'ios' ? (insetsBottom || 12) : (insetsBottom ? insetsBottom + 6 : 10);
+
+  const iconForRoute = (routeName: string, focused: boolean) => {
+    switch (routeName) {
+      case 'movies':
+        return focused ? 'home' : 'home-outline';
+      case 'categories':
+        return focused ? 'grid' : 'grid-outline';
+      case 'search':
+        return focused ? 'search' : 'search-outline';
+      case 'downloads':
+        return focused ? 'download' : 'download-outline';
+      default:
+        return focused ? 'ellipse' : 'ellipse-outline';
+    }
+  };
+
+  const labelForRoute = (routeName: string) => {
+    switch (routeName) {
+      case 'movies':
+        return 'Home';
+      case 'categories':
+        return 'Categories';
+      case 'search':
+        return 'Search';
+      case 'downloads':
+        return 'Downloads';
+      default:
+        return routeName;
+    }
+  };
+
+  return (
+    <View pointerEvents="box-none" style={[styles.outer, { bottom: bottomOffset }]}>
+      <BlurView intensity={80} tint={isDark ? 'dark' : 'light'} style={styles.blurWrap}>
+        <View
+          style={[
+            styles.overlay,
+            { backgroundColor: isDark ? 'rgba(120,20,20,0.18)' : 'rgba(255,80,80,0.12)' },
+          ]}
+        />
+        <View style={styles.inner}>
+          {state.routes.map((route, idx) => {
+            const focused = state.index === idx;
+            const routeName = route.name;
+
+            const onPress = () => {
+              const event = navigation.emit({
+                type: 'tabPress',
+                target: route.key,
+                canPreventDefault: true,
+              } as any);
+
+              if (!focused && !(event as any).defaultPrevented) {
+                navigation.navigate(routeName as never);
+              }
+            };
+
+            const onLongPress = () => {
+              navigation.emit({
+                type: 'tabLongPress',
+                target: route.key,
+              } as any);
+            };
+
+            const iconName = iconForRoute(routeName, focused);
+            const label = labelForRoute(routeName);
+
+            return (
+              <TouchableOpacity
+                key={route.key}
+                onPress={onPress}
+                onLongPress={onLongPress}
+                style={styles.item}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityState={{ selected: focused }}
+              >
+                <Ionicons name={iconName as any} size={22} color={focused ? '#ffd600' : '#fff'} />
+                <Text style={[styles.text, focused ? styles.activeText : undefined]}>{label}</Text>
+                {focused && <View style={styles.activeDot} />}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </BlurView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  outer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  blurWrap: {
+    width: '92%',
+    borderRadius: 22,
+    overflow: 'hidden',
+    shadowColor: '#ff4b4b',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 10,
+    minHeight: 72,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.04)',
+  },
+  inner: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    minHeight: 72,
+  },
+  item: {
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    minWidth: 56,
+  },
+  text: {
+    color: '#fff',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  activeText: {
+    color: '#ffd600',
+    fontWeight: '700',
+    fontSize: 11,
+  },
+  activeDot: {
+    marginTop: 6,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ffd600',
+    alignSelf: 'center',
+  },
+});

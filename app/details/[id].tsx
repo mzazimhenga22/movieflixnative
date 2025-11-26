@@ -1,10 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { StatusBar } from 'react-native';
+import {
+  StatusBar,
+  Modal,
+  View,
+  TouchableOpacity,
+  Text,
+  StyleSheet,
+  Platform,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import MovieDetailsView from './MovieDetailsView';
 import { API_KEY, API_BASE_URL } from '../../constants/api';
-import { Media } from '../../types';
+import { Media, CastMember } from '../../types';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { MainVideoPlayer } from '../../components/MainVideoPlayer';
+import ScreenWrapper from '../../components/ScreenWrapper';
+import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
 
 interface Video {
   key: string;
@@ -13,90 +26,239 @@ interface Video {
   type: string;
 }
 
+const ACCENT = '#E50914';
+
 const MovieDetailsContainer: React.FC = () => {
-  const { id } = useLocalSearchParams();
+  const { id, mediaType } = useLocalSearchParams();
   const router = useRouter();
   const [movie, setMovie] = useState<Media | null>(null);
   const [trailers, setTrailers] = useState<Video[]>([]);
   const [relatedMovies, setRelatedMovies] = useState<Media[]>([]);
+  const [seasons, setSeasons] = useState<any[]>([]);
+  const [cast, setCast] = useState<CastMember[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isVideoVisible, setIsVideoVisible] = useState(false);
 
   useEffect(() => {
     let mounted = true;
-    // small guard: if no id, don't fetch
-    if (!id) {
+    if (!id || !mediaType) {
       setIsLoading(false);
       return;
     }
 
-    const fetchMovieDetails = async () => {
+    const fetchDetails = async () => {
       setIsLoading(true);
       try {
-        // fetch details in parallel
-        const [detailsRes, videosRes, relatedRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/movie/${id}?api_key=${API_KEY}`),
-          fetch(`${API_BASE_URL}/movie/${id}/videos?api_key=${API_KEY}`),
-          fetch(`${API_BASE_URL}/movie/${id}/recommendations?api_key=${API_KEY}`),
+        const [detailsRes, videosRes, relatedRes, creditsRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/${mediaType}/${id}?api_key=${API_KEY}`),
+          fetch(`${API_BASE_URL}/${mediaType}/${id}/videos?api_key=${API_KEY}`),
+          fetch(`${API_BASE_URL}/${mediaType}/${id}/recommendations?api_key=${API_KEY}`),
+          fetch(`${API_BASE_URL}/${mediaType}/${id}/credits?api_key=${API_KEY}`),
         ]);
 
-        const movieDetailsData = await detailsRes.json();
-        const movieVideosData = await videosRes.json();
-        const relatedMoviesData = await relatedRes.json();
+        const detailsData = await detailsRes.json();
+        const videosData = await videosRes.json();
+        const relatedData = await relatedRes.json();
+        const creditsData = await creditsRes.json();
 
         if (!mounted) return;
 
-        setMovie(movieDetailsData || null);
+        setMovie(detailsData || null);
         setTrailers(
-          (movieVideosData?.results || []).filter(
+          (videosData?.results || []).filter(
             (video: Video) => video.site === 'YouTube' && video.type === 'Trailer'
           )
         );
-        setRelatedMovies(relatedMoviesData?.results || []);
+        setRelatedMovies(relatedData?.results || []);
+        setCast(creditsData?.cast || []);
+
+        if (mediaType === 'tv' && detailsData.seasons) {
+          const seasonsData = await Promise.all(
+            detailsData.seasons.map((season: any) =>
+              fetch(`${API_BASE_URL}/tv/${id}/season/${season.season_number}?api_key=${API_KEY}`).then(res => res.json())
+            )
+          );
+          if (mounted) {
+            setSeasons(seasonsData);
+          }
+        }
+
       } catch (error) {
-        console.error('Error fetching movie details:', error);
+        console.error('Error fetching details:', error);
         if (mounted) {
           setMovie(null);
           setTrailers([]);
           setRelatedMovies([]);
+          setSeasons([]);
+          setCast([]);
         }
       } finally {
         if (mounted) setIsLoading(false);
       }
     };
 
-    // small delay to let UI render the skeleton immediately for better perceived performance
-    const t = setTimeout(fetchMovieDetails, 120);
+    // small delay to smoothen transitions (keeps same behavior as before)
+    const t = setTimeout(fetchDetails, 120);
     return () => {
       mounted = false;
       clearTimeout(t);
     };
-  }, [id]);
+  }, [id, mediaType]);
 
-  const handleWatchTrailer = (key?: string) => {
-    const trailerKey = key || (trailers.length > 0 ? trailers[0].key : null);
-    if (trailerKey) {
-      WebBrowser.openBrowserAsync(`https://www.youtube.com/watch?v=${trailerKey}`);
-    }
+  const handleWatchTrailer = () => {
+    setIsVideoVisible(true);
   };
 
   const handleBack = () => {
     router.back();
   };
 
+  const handleAddToMyList = async (movie: Media) => {
+    try {
+      const myList = await AsyncStorage.getItem('myList');
+      const list = myList ? JSON.parse(myList) : [];
+      const alreadyInList = list.find((item: Media) => item.id === movie.id);
+      if (!alreadyInList) {
+        list.push(movie);
+        await AsyncStorage.setItem('myList', JSON.stringify(list));
+        alert('Added to My List');
+      } else {
+        alert('Already in My List');
+      }
+    } catch (error) {
+      console.error('Error adding to My List:', error);
+    }
+  };
+  
+  const handleSelectRelated = (relatedId: number) => {
+    const relatedItem = relatedMovies.find(item => item.id === relatedId);
+    if (relatedItem) {
+        router.push(`/details/${relatedId}?mediaType=${relatedItem.media_type}`);
+    } else {
+        router.push(`/details/${relatedId}?mediaType=movie`);
+    }
+  };
+
   return (
     <>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      <MovieDetailsView
-        movie={movie}
-        trailers={trailers}
-        relatedMovies={relatedMovies}
-        isLoading={isLoading}
-        onWatchTrailer={handleWatchTrailer}
-        onBack={handleBack}
-        onSelectRelated={(relatedId: number) => router.push(`/details/${relatedId}`)}
-      />
+      <LinearGradient
+        colors={['#2b0000', '#120206', '#06060a']}
+        start={[0, 0]}
+        end={[1, 1]}
+        style={{ flex: 1 }}
+      >
+        {/* subtle glass overlay to match app look */}
+        <BlurView intensity={30} tint="dark" style={styles.bgOverlay} />
+        <ScreenWrapper>
+          <MovieDetailsView
+            movie={movie}
+            trailers={trailers}
+            relatedMovies={relatedMovies}
+            isLoading={isLoading}
+            onWatchTrailer={handleWatchTrailer}
+            onBack={handleBack}
+            onSelectRelated={handleSelectRelated}
+            onAddToMyList={handleAddToMyList}
+            seasons={seasons}
+            mediaType={mediaType}
+            cast={cast}
+          />
+        </ScreenWrapper>
+      </LinearGradient>
+
+      {/* Trailer Modal — glassy player with a close bar */}
+      <Modal
+        animationType="slide"
+        transparent={false}
+        visible={isVideoVisible}
+        onRequestClose={() => setIsVideoVisible(false)}
+      >
+        <LinearGradient
+          colors={['#050405', '#120206']}
+          style={styles.modalContainer}
+          start={[0, 0]}
+          end={[1, 1]}
+        >
+          <BlurView intensity={40} tint="dark" style={styles.modalBlur} />
+
+          {/* top bar with back/close button */}
+          <View style={styles.modalTopBar}>
+            <TouchableOpacity
+              onPress={() => setIsVideoVisible(false)}
+              style={styles.modalCloseBtn}
+              accessibilityLabel="Close video"
+            >
+              <Ionicons name="chevron-down" size={28} color="#fff" />
+            </TouchableOpacity>
+
+            <View style={styles.modalTitleWrap}>
+              <Text style={styles.modalTitle}>{movie?.title || movie?.name || 'Trailer'}</Text>
+            </View>
+
+            <View style={{ width: 40 }} />
+          </View>
+
+          {/* Player */}
+          <View style={styles.playerWrap}>
+            {/* keep the MainVideoPlayer usage — swap source as needed */}
+            <MainVideoPlayer videoSource="http://d23dyxeqlo5psv.cloudfront.net/big_buck_bunny.mp4" />
+          </View>
+        </LinearGradient>
+      </Modal>
     </>
   );
 };
+
+const styles = StyleSheet.create({
+  bgOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.01)',
+  },
+  modalContainer: {
+    flex: 1,
+    paddingTop: Platform.OS === 'ios' ? 48 : 18,
+    backgroundColor: '#000',
+  },
+  modalBlur: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  modalTopBar: {
+    height: 56,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    zIndex: 10,
+  },
+  modalCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  modalTitleWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalTitle: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  playerWrap: {
+    flex: 1,
+    marginTop: 8,
+    marginHorizontal: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+  },
+});
 
 export default MovieDetailsContainer;

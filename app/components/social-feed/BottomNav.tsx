@@ -1,116 +1,161 @@
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, useColorScheme } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function BottomNav() {
   const router = useRouter();
   const pathname = usePathname();
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
 
   const isActive = (route: string) => {
-    const currentRoute = pathname.split('/').pop();
+    const currentRoute = pathname?.split('/').pop();
     return currentRoute === route || (route === 'index' && currentRoute === 'social-feed');
   };
 
   return (
-    <View style={styles.container}>
-      <TouchableOpacity 
-        style={styles.item} 
-        onPress={() => router.push('./')}
+    <View pointerEvents="box-none" style={[styles.outer, { bottom: insets.bottom }]}>
+      <BlurView
+        intensity={80}
+        tint={isDark ? 'dark' : 'light'}
+        style={styles.blurWrap}
       >
-        <Ionicons 
-          name="home" 
-          size={22} 
-          color={isActive('index') ? "#ffd600" : "#fff"} 
+        <View
+          style={[
+            styles.overlay,
+            {
+              backgroundColor: isDark
+                ? 'rgba(120,20,20,0.18)' // subtle deep red tint in dark mode
+                : 'rgba(255,80,80,0.12)', // lighter tint in light mode
+            },
+          ]}
         />
-        <Text style={isActive('index') ? styles.active : styles.text}>Feeds</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.item} 
-        onPress={() => router.push('./stories')}
-      >
-        <Ionicons 
-          name="time" 
-          size={22} 
-          color={isActive('stories') ? "#ffd600" : "#fff"} 
-        />
-        <Text style={isActive('stories') ? styles.active : styles.text}>Stories</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.item} 
-        onPress={() => router.push('./notifications')}
-      >
-        <Ionicons 
-          name="notifications" 
-          size={22} 
-          color={isActive('notifications') ? "#ffd600" : "#fff"} 
-        />
-        <Text style={isActive('notifications') ? styles.active : styles.text}>Notifications</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.item} 
-        onPress={() => router.push('./streaks')}
-      >
-        <Ionicons 
-          name="flame" 
-          size={22} 
-          color={isActive('/social-feed/streaks') ? "#ffd600" : "#fff"} 
-        />
-        <Text style={isActive('/social-feed/streaks') ? styles.active : styles.text}>Streaks</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity 
-        style={styles.item} 
-        onPress={() => router.replace('/profile')}
-      >
-        <Ionicons 
-          name="person" 
-          size={22} 
-          color={isActive('/profile') ? "#ffd600" : "#fff"} 
-        />
-        <Text style={isActive('/profile') ? styles.active : styles.text}>Profile</Text>
-      </TouchableOpacity>
+        <View style={styles.inner}>
+          <NavItem
+            onPress={() => router.push('/social-feed')}
+            icon="home"
+            label="Feeds"
+            active={isActive('index')}
+          />
+          <NavItem
+            onPress={() => router.push('/social-feed/stories')}
+            icon="time"
+            label="Stories"
+            active={isActive('stories')}
+          />
+          <NavItem
+            onPress={() => router.push('/social-feed/notifications')}
+            icon="notifications"
+            label="Notifications"
+            active={isActive('notifications')}
+          />
+          <NavItem
+            onPress={() => router.push('/social-feed/streaks')}
+            icon="flame"
+            label="Streaks"
+            active={isActive('streaks')}
+          />
+          <NavItem
+            onPress={() => router.replace('/profile?from=social-feed')}
+            icon="person"
+            label="Profile"
+            active={isActive('profile')}
+          />
+        </View>
+      </BlurView>
     </View>
   );
 }
 
+function NavItem({
+  onPress,
+  icon,
+  label,
+  active,
+}: {
+  onPress: () => void;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  active?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      style={styles.item}
+      activeOpacity={0.85}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!active }}
+    >
+      <Ionicons
+        name={icon}
+        size={22}
+        color={active ? '#ffd600' : '#fff'}
+      />
+      <Text style={[styles.text, active ? styles.activeText : undefined]}>
+        {label}
+      </Text>
+      {active && <View style={styles.activeDot} />}
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-around', 
-    alignItems: 'center', 
-    paddingVertical: 12,
-    paddingHorizontal: 8,
+  outer: {
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(26, 26, 26, 0.98)',
-    paddingBottom: 24, // Add extra padding for safe area
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 5,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  item: { 
     alignItems: 'center',
-    paddingHorizontal: 16,
+    // keep pointerEvents available for children
   },
-  text: { 
-    color: '#fff', 
+  blurWrap: {
+    width: '92%', // slightly inset from edges for a card-like look
+    borderRadius: 22,
+    overflow: 'hidden',
+    // shadow for depth
+    shadowColor: '#ff4b4b',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.04)',
+  },
+  inner: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+  },
+  item: {
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    minWidth: 56,
+  },
+  text: {
+    color: '#fff',
     fontSize: 11,
     marginTop: 4,
   },
-  active: { 
-    color: '#ff4b4b', 
-    fontSize: 11, 
+  activeText: {
+    color: '#ffd600',
     fontWeight: '700',
-    marginTop: 4,
+    fontSize: 11,
+  },
+  activeDot: {
+    marginTop: 6,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#ffd600',
+    alignSelf: 'center',
   },
 });

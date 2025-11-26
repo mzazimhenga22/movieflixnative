@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { PulsePlaceholder } from './PulsePlaceholder';
+import PulsePlaceholder from './PulsePlaceholder'; // Corrected import
 
 interface Video {
   key: string;

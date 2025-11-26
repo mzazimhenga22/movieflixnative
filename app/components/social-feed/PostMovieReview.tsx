@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
+import { BlurView } from 'expo-blur';
 
 export default function PostMovieReview() {
   const router = useRouter();
@@ -13,6 +14,9 @@ export default function PostMovieReview() {
 
   return (
     <TouchableOpacity style={styles.container} onPress={handlePostReview}>
+      {Platform.OS !== 'web' && (
+      <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
+      )}
       <View style={styles.content}>
         <View style={styles.iconWrapper}>
           <Ionicons name="film-outline" size={24} color="#fff" />
@@ -31,9 +35,18 @@ const styles = StyleSheet.create({
   container: {
     marginHorizontal: 16,
     marginVertical: 8,
-    backgroundColor: '#2a2a2a',
     borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.06,
+    shadowRadius: 24,
     overflow: 'hidden',
+    backgroundColor: Platform.select({
+      web: 'rgba(255,255,255,0.04)',
+      default: 'transparent',
+    }),
   },
   content: {
     flexDirection: 'row',

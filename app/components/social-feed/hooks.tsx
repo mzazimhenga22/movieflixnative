@@ -14,9 +14,9 @@ export type ReviewItem = {
   commentsCount: number;
   comments?: Array<{ id: number; user: string; text: string }>;
   watched: number;
-  retweet?: boolean;
-  liked?: boolean;
-  bookmarked?: boolean;
+  retweet: boolean;
+  liked: boolean;
+  bookmarked: boolean;
   videoUrl?: string;
 };
 

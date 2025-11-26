@@ -20,8 +20,8 @@ interface MovieListProps {
 const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true }) => {
   const router = useRouter();
 
-  const handlePress = (movieId: number) => {
-    router.push(`/details/${movieId}`);
+  const handlePress = (movieId: number, mediaType: 'movie' | 'tv' | undefined) => {
+    router.push(`/details/${movieId}?mediaType=${mediaType || 'movie'}`);
   };
 
   // Return null if movies array is empty or undefined
@@ -30,7 +30,7 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true })
   }
 
   const renderCarouselItem = ({ item }: { item: Media }) => (
-    <TouchableOpacity style={styles.carouselMovieCard} onPress={() => handlePress(item.id)}>
+    <TouchableOpacity style={styles.carouselMovieCard} onPress={() => handlePress(item.id, item.media_type)}>
       <Image
         source={{ uri: `${IMAGE_BASE_URL}${item.poster_path}` }}
         style={styles.carouselMovieImage}
@@ -42,7 +42,7 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true })
   );
 
   const renderVerticalItem = (item: Media) => (
-    <TouchableOpacity key={item.id} style={styles.verticalMovieCard} onPress={() => handlePress(item.id)}>
+    <TouchableOpacity key={item.id} style={styles.verticalMovieCard} onPress={() => handlePress(item.id, item.media_type)}>
       <Image
         source={{ uri: `${IMAGE_BASE_URL}${item.poster_path}` }}
         style={styles.verticalMovieImage}

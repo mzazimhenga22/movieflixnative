@@ -8,6 +8,7 @@ import {
   ViewStyle,
   TextStyle,
   AccessibilityRole,
+  Platform,
 } from 'react-native';
 
 type Tab = 'Feed' | 'Recommended' | 'Live' | 'Movie Match';
@@ -20,15 +21,14 @@ interface Props {
 const tabs: Tab[] = ['Feed', 'Recommended', 'Live', 'Movie Match'];
 
 export default function FeedTabs({ active, onChangeTab }: Props) {
-  // simple animation for active dot/underline (scale + fade)
+  // value 0..1 used to animate active indicator
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // animate in when active changes
     anim.setValue(0);
     Animated.timing(anim, {
       toValue: 1,
-      duration: 220,
+      duration: 260,
       useNativeDriver: true,
     }).start();
   }, [active, anim]);
@@ -46,18 +46,16 @@ export default function FeedTabs({ active, onChangeTab }: Props) {
               onPress={() => onChangeTab(tab)}
               style={({ pressed }) => [
                 styles.tabBtn,
-                isActive ? styles.tabBtnActive : undefined,
+                isActive && styles.tabBtnActive,
                 pressed && styles.tabPressed,
               ]}
               accessibilityRole={accessibleRole}
               accessibilityState={{ selected: isActive }}
               accessibilityLabel={`${tab} tab`}
             >
-              <Text style={[styles.tabText, isActive ? styles.tabTextActive : undefined]}>
-                {tab}
-              </Text>
+              <Text style={[styles.tabText, isActive && styles.tabTextActive]}>{tab}</Text>
 
-              {/* animated underline / dot */}
+              {/* Animated glassy indicator */}
               <Animated.View
                 pointerEvents="none"
                 style={[
@@ -69,20 +67,23 @@ export default function FeedTabs({ active, onChangeTab }: Props) {
                           {
                             scaleX: anim.interpolate({
                               inputRange: [0, 1],
-                              outputRange: [0.6, 1],
+                              outputRange: [0.85, 1],
                             }),
                           },
                           {
-                            scaleY: anim.interpolate({
+                            translateY: anim.interpolate({
                               inputRange: [0, 1],
-                              outputRange: [0.6, 1],
+                              outputRange: [6, 0],
                             }),
                           },
                         ],
                       }
-                    : { opacity: 0, transform: [{ scale: 0.6 }] },
+                    : { opacity: 0.0, transform: [{ scale: 0.85 }, { translateY: 6 }] },
                 ]}
-              />
+              >
+                {/* inner highlight to sell the glass look */}
+                <View style={styles.indicatorInner} />
+              </Animated.View>
             </Pressable>
           );
         })}
@@ -100,67 +101,114 @@ type Style = {
   tabText: TextStyle;
   tabTextActive: TextStyle;
   activeIndicator: ViewStyle;
+  indicatorInner: ViewStyle;
 };
 
 const styles = StyleSheet.create<Style>({
   wrapper: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    // subtle background to separate from content
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    // keep wrapper transparent so the glass blends with background
     backgroundColor: 'transparent',
   },
   container: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderRadius: 14,
-    padding: 6,
-    // soft shadow for depth (iOS + Android)
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 2,
+    // subtle frosted panel using translucent fills + thin border
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 16,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    // soft outer shadow for depth
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.06,
+        shadowRadius: 24,
+      },
+      android: {
+        elevation: 2,
+      },
+      default: {},
+    }),
   },
   tabBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
-    minWidth: 80,
-    marginHorizontal: 4,
+    minWidth: 92,
+    marginHorizontal: 6,
+    // create subtle inner "frost" using layered backgrounds (lighter center)
+    backgroundColor: 'transparent',
   },
   tabBtnActive: {
-    backgroundColor: 'rgba(255,61,61,0.12)', // soft red highlight
-    // stronger shadow when active
-    shadowColor: '#ff3d3d',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 3,
+    // slightly stronger glass fill on active
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    // faint glow using a colored shadow to hint brand accent
+    ...Platform.select({
+      ios: {
+        shadowColor: 'rgba(255,61,61,0.12)',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 1,
+        shadowRadius: 14,
+      },
+      android: {
+        elevation: 3,
+      },
+      default: {},
+    }),
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.04)',
   },
   tabPressed: {
     opacity: 0.85,
+    transform: [{ scale: 0.995 }],
   },
   tabText: {
-    color: '#cfcfcf',
-    fontSize: 14,
-    fontWeight: '500',
-    letterSpacing: 0.2,
+    color: '#d7d7d7',
+    fontSize: 13,
+    fontWeight: '600',
+    letterSpacing: 0.1,
   },
   tabTextActive: {
-    color: '#ff3d3d',
-    fontSize: 15,
+    color: '#ff6b6b', // warm accent color
+    fontSize: 14,
     fontWeight: '700',
   },
   activeIndicator: {
-    marginTop: 6,
-    width: 28,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#ff3d3d',
+    marginTop: 8,
+    width: 36,
+    height: 8,
+    borderRadius: 999,
+    // glassy base: translucent bright pill
+    backgroundColor: 'rgba(255,107,107,0.12)',
     alignSelf: 'center',
+    // subtle outer glow
+    ...Platform.select({
+      ios: {
+        shadowColor: 'rgba(255,107,107,0.12)',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 1,
+        shadowRadius: 12,
+      },
+      android: {
+        elevation: 1,
+      },
+      default: {},
+    }),
+    overflow: 'hidden',
+  },
+  indicatorInner: {
+    flex: 1,
+    margin: 1,
+    borderRadius: 999,
+    // inner highlight gradient mimic (lighter center)
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    opacity: 0.95,
   },
 });

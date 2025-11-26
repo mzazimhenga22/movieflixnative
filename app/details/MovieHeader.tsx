@@ -12,7 +12,7 @@ import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { IMAGE_BASE_URL } from '../../constants/api';
 import { Media } from '../../types';
-import { PulsePlaceholder } from './PulsePlaceholder';
+import PulsePlaceholder from './PulsePlaceholder';
 
 const { width } = Dimensions.get('window');
 const BACKDROP_HEIGHT = 460;
@@ -22,9 +22,20 @@ interface Props {
   isLoading: boolean;
   onWatchTrailer: () => void;
   onBack: () => void;
+  onAddToMyList: () => void;
+  onPlayMovie: () => void; // New prop for playing movie via p-stream
+  isPStreamPlaying: boolean; // New prop to indicate if p-stream is playing
 }
 
-const MovieHeader: React.FC<Props> = ({ movie, isLoading, onWatchTrailer, onBack }) => {
+const MovieHeader: React.FC<Props> = ({
+  movie,
+  isLoading,
+  onWatchTrailer,
+  onBack,
+  onAddToMyList,
+  onPlayMovie,
+  isPStreamPlaying,
+}) => {
   const backdropUri = movie ? `${IMAGE_BASE_URL}${movie.backdrop_path || movie.poster_path}` : null;
 
   return (
@@ -55,15 +66,23 @@ const MovieHeader: React.FC<Props> = ({ movie, isLoading, onWatchTrailer, onBack
         style={styles.gradientOverlay}
       />
 
-      <TouchableOpacity style={styles.mainPlayButton} onPress={onWatchTrailer}>
+      <TouchableOpacity style={styles.mainPlayButton} onPress={isPStreamPlaying ? onBack : onPlayMovie}> {/* Conditionally call onBack or onPlayMovie */}
         <View style={styles.mainPlayOuter}>
-          <FontAwesome name="play-circle" size={66} color="rgba(255,255,255,0.9)" />
+          <FontAwesome name={isPStreamPlaying ? "compress" : "play-circle"} size={66} color="rgba(255,255,255,0.9)" />
         </View>
       </TouchableOpacity>
 
       <View style={styles.actionButtonsContainer}>
         {['share-alt', 'plus', 'download', 'star'].map((name, i) => (
-          <TouchableOpacity key={i} style={styles.actionItem}>
+          <TouchableOpacity
+            key={i}
+            style={styles.actionItem}
+            onPress={() => {
+              if (name === 'plus') {
+                onAddToMyList();
+              }
+            }}
+          >
             <FontAwesome name={name as any} size={20} color="white" />
           </TouchableOpacity>
         ))}

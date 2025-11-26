@@ -1,83 +1,31 @@
-import { Ionicons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
+// app/(tabs)/_layout.tsx
 import React from 'react';
-import { Platform } from 'react-native';
+import { Tabs } from 'expo-router';
+import { useColorScheme } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import BottomNav from '../components/BottomNav'; // adjust path if needed
 
-export default function TabLayout() {
+export default function TabLayout(): React.ReactElement {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: 'red',
-        tabBarInactiveTintColor: 'gray',
-        tabBarStyle: {
-          backgroundColor: 'rgba(34, 34, 34, 0.9)', // Semi-transparent background
-          borderTopWidth: 0, // Remove top border
-          elevation: 0, // Remove shadow on Android
-          position: 'absolute', // Make it float over the content
-          bottom: Platform.OS === 'ios' ? 20 : 10, // Adjust position
-          left: 20,
-          right: 20,
-          borderRadius: 25,
-          height: 60,
-          paddingBottom: 5,
-        },
+        tabBarActiveTintColor: '#ffd600',
+        tabBarInactiveTintColor: isDark ? '#fff' : '#fff',
+        tabBarShowLabel: false,
+        tabBarStyle: { display: 'none' },
       }}
+      tabBar={(props) => <BottomNav {...props} insetsBottom={insets.bottom} isDark={isDark} />}
     >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="categories"
-        options={{
-          title: 'Categories',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'grid' : 'grid-outline'} size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="recommended"
-        options={{
-          title: 'For You',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'heart' : 'heart-outline'} size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="live"
-        options={{
-          title: 'Live',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'radio' : 'radio-outline'} size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="movie-match"
-        options={{
-          title: 'Match',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'people' : 'people-outline'} size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="interactive"
-        options={{
-          title: 'Interactive',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'game-controller' : 'game-controller-outline'} size={24} color={color} />
-          ),
-        }}
-      />
+      <Tabs.Screen name="movies" options={{ title: 'Home' }} />
+      <Tabs.Screen name="categories" options={{ title: 'Categories' }} />
+      <Tabs.Screen name="search" options={{ title: 'Search' }} />
+      <Tabs.Screen name="downloads" options={{ title: 'Downloads' }} />
+      <Tabs.Screen name="interactive" options={{ title: 'More' }} />
     </Tabs>
   );
 }

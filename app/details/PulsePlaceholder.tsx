@@ -1,7 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Animated } from 'react-native';
 
-export const PulsePlaceholder: React.FC<{ style?: any }> = ({ style }) => {
+const PulsePlaceholder: React.FC<{ style?: any }> = ({ style }) => {
   const anim = useRef(new Animated.Value(0.6)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -23,3 +23,5 @@ export const PulsePlaceholder: React.FC<{ style?: any }> = ({ style }) => {
     />
   );
 };
+
+export default PulsePlaceholder;

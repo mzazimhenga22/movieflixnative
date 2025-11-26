@@ -1,14 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-
-// Mock data for stories - in a real app this would come from your backend
-const MOCK_STORIES = [
-  { id: 1, username: 'John', hasStory: true },
-  { id: 2, username: 'Sarah', hasStory: true },
-  { id: 3, username: 'Mike', hasStory: true },
-];
+import React, { useEffect, useState } from 'react';
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { onStoriesUpdate } from './storiesController';
 
 interface Props {
   showAddStory?: boolean;
@@ -16,34 +17,69 @@ interface Props {
 
 export default function StoriesRow({ showAddStory = false }: Props) {
   const router = useRouter();
+  const { width } = useWindowDimensions();
+  const [stories, setStories] = useState<any[]>([]);
+  // make item spacing responsive a bit
+  const itemSize = width >= 420 ? 98 : 84; // avatar diameter
+  const avatarInner = Math.round(itemSize * 0.78); // inner avatar size
+
+  useEffect(() => {
+    const unsubscribe = onStoriesUpdate(setStories);
+    return () => unsubscribe();
+  }, []);
 
   const handleStoryUpload = () => {
-    // Navigate to story upload screen
     router.push('/story-upload');
   };
 
   return (
     <View style={styles.container}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.scrollView}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.scrollViewContent}
+      >
         {showAddStory && (
-          <TouchableOpacity style={styles.storyItem} onPress={handleStoryUpload}>
-            <View style={styles.avatarWrap}>
-              <View style={styles.avatar} />
-              <TouchableOpacity style={styles.plusBtn}>
-                <Ionicons name="add" size={16} color="#fff" />
-              </TouchableOpacity>
+          <TouchableOpacity
+            onPress={handleStoryUpload}
+            style={[styles.storyItem, { width: itemSize }]}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Add your story"
+          >
+            <View style={[styles.ring, styles.addRing, { width: itemSize, height: itemSize, borderRadius: itemSize / 2 }]}>
+              <View style={[styles.avatarInnerWrap, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]}>
+                <View style={[styles.avatar, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]} />
+                <View style={[styles.plusBtn, { right: -8, bottom: -8 }]}>
+                  <Ionicons name="add" size={16} color="#fff" />
+                </View>
+              </View>
             </View>
-            <Text style={styles.storyText}>Your story</Text>
+            <Text style={styles.storyText} numberOfLines={1} ellipsizeMode="tail">
+              Your story
+            </Text>
+            <Text style={styles.smallText}>Tap to add</Text>
           </TouchableOpacity>
         )}
 
         {/* Other Stories */}
-        {MOCK_STORIES.map((story) => (
-          <TouchableOpacity key={story.id} style={styles.storyItem}>
-            <View style={styles.avatarWrap}>
-              <View style={[styles.avatar, styles.hasStory]} />
+        {stories.map((story) => (
+          <TouchableOpacity
+            key={story.id}
+            style={[styles.storyItem, { width: itemSize }]}
+            activeOpacity={0.92}
+            accessibilityRole="button"
+            accessibilityLabel={`${story.username}'s story`}
+          >
+            <View style={[styles.ring, { width: itemSize, height: itemSize, borderRadius: itemSize / 2 }]}>
+              <View style={[styles.avatarInnerWrap, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]}>
+                <View style={[styles.avatar, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]} />
+              </View>
             </View>
-            <Text style={styles.storyText}>{story.username}</Text>
+            <Text style={styles.storyText} numberOfLines={1} ellipsizeMode="tail">
+              {story.username}
+            </Text>
+            <Text style={styles.smallText}>Live</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -53,39 +89,67 @@ export default function StoriesRow({ showAddStory = false }: Props) {
 
 const styles = StyleSheet.create({
   container: {
-    marginVertical: 8,
+    marginVertical: 12,
   },
-  scrollView: {
+  scrollViewContent: {
     paddingHorizontal: 16,
+    alignItems: 'center',
   },
   storyItem: {
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: 18,
   },
-  avatarWrap: {
-    position: 'relative',
-    marginBottom: 4,
+  ring: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    // simulated gradient ring using layered borders (suits most designs without extra deps)
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  addRing: {
+    // warmer accent for add/personal story
+    borderColor: 'rgba(255,61,61,0.18)',
+  },
+  avatarInnerWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.02)',
   },
   avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#3a3a3a',
-  },
-  hasStory: {
+    backgroundColor: '#2f2f2f',
     borderWidth: 2,
-    borderColor: '#ff4b4b',
+    borderColor: 'rgba(255,255,255,0.03)',
   },
   plusBtn: {
     position: 'absolute',
-    bottom: -2,
-    right: -2,
     backgroundColor: '#ff3d3d',
-    borderRadius: 12,
-    padding: 4,
+    borderRadius: 16,
+    padding: 6,
+    borderWidth: 2,
+    borderColor: '#1b1b1b',
+    shadowColor: '#ff3d3d',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
   },
   storyText: {
-    color: '#ddd',
-    fontSize: 12,
+    color: '#fff',
+    fontSize: 13,
+    marginTop: 8,
+    fontWeight: '700',
+    maxWidth: 110,
+    textAlign: 'center',
+  },
+  smallText: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 11,
+    marginTop: 2,
   },
 });

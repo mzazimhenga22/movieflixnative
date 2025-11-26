@@ -27,7 +27,7 @@ const FeaturedMovie: React.FC<FeaturedMovieProps> = ({ movie, getGenreNames }) =
 
   const handlePress = () => {
     if (movie) {
-      router.push(`/details/${movie.id}`);
+      router.push(`/details/${movie.id}?mediaType=${movie.media_type || 'movie'}`);
     }
   };
 

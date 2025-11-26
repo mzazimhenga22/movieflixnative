@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View, Text } from 'react-native';
 import { Media } from '../../types';
-import { PulsePlaceholder } from './PulsePlaceholder';
+import PulsePlaceholder from './PulsePlaceholder'; // Corrected import
 
 interface Props {
   movie: Media | null;
@@ -20,7 +20,7 @@ const MovieInfo: React.FC<Props> = ({ movie, isLoading }) => {
       {isLoading ? (
         <PulsePlaceholder style={styles.datePlaceholder} />
       ) : (
-        <Text style={styles.releaseDate}>Release Date: {movie?.release_date || 'N/A'}</Text>
+        <Text style={styles.releaseDate}>Release Date: {movie?.release_date || movie?.first_air_date || 'N/A'}</Text>
       )}
 
       {isLoading ? (
