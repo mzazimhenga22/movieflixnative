@@ -18,6 +18,7 @@ import ScreenWrapper from '../../components/ScreenWrapper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { getAccentFromPosterPath } from '../../constants/theme';
 
 interface Video {
   key: string;
@@ -38,6 +39,7 @@ const MovieDetailsContainer: React.FC = () => {
   const [cast, setCast] = useState<CastMember[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isVideoVisible, setIsVideoVisible] = useState(false);
+  const accentColor = getAccentFromPosterPath(movie?.poster_path);
 
   useEffect(() => {
     let mounted = true;
@@ -131,41 +133,39 @@ const MovieDetailsContainer: React.FC = () => {
   };
   
   const handleSelectRelated = (relatedId: number) => {
-    const relatedItem = relatedMovies.find(item => item.id === relatedId);
+    const relatedItem = relatedMovies.find((item) => item.id === relatedId);
     if (relatedItem) {
-        router.push(`/details/${relatedId}?mediaType=${relatedItem.media_type}`);
+      router.push(`/details/${relatedId}?mediaType=${relatedItem.media_type}`);
     } else {
-        router.push(`/details/${relatedId}?mediaType=movie`);
+      router.push(`/details/${relatedId}?mediaType=movie`);
     }
   };
 
   return (
     <>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      <LinearGradient
-        colors={['#2b0000', '#120206', '#06060a']}
-        start={[0, 0]}
-        end={[1, 1]}
-        style={{ flex: 1 }}
-      >
-        {/* subtle glass overlay to match app look */}
-        <BlurView intensity={30} tint="dark" style={styles.bgOverlay} />
-        <ScreenWrapper>
-          <MovieDetailsView
-            movie={movie}
-            trailers={trailers}
-            relatedMovies={relatedMovies}
-            isLoading={isLoading}
-            onWatchTrailer={handleWatchTrailer}
-            onBack={handleBack}
-            onSelectRelated={handleSelectRelated}
-            onAddToMyList={handleAddToMyList}
-            seasons={seasons}
-            mediaType={mediaType}
-            cast={cast}
-          />
-        </ScreenWrapper>
-      </LinearGradient>
+      <ScreenWrapper style={styles.pageWrapper}>
+        <LinearGradient
+          colors={[accentColor, '#150a13', '#05060f']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <View style={styles.backgroundLayer} />
+        <MovieDetailsView
+          movie={movie}
+          trailers={trailers}
+          relatedMovies={relatedMovies}
+          isLoading={isLoading}
+          onWatchTrailer={handleWatchTrailer}
+          onBack={handleBack}
+          onSelectRelated={handleSelectRelated}
+          onAddToMyList={handleAddToMyList}
+          seasons={seasons}
+          mediaType={mediaType}
+          cast={cast}
+        />
+      </ScreenWrapper>
 
       {/* Trailer Modal — glassy player with a close bar */}
       <Modal
@@ -211,13 +211,19 @@ const MovieDetailsContainer: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  bgOverlay: {
+  pageWrapper: {
+    paddingTop: 0,
+  },
+  backgroundLayer: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.01)',
+    backgroundColor: 'rgba(10,12,20,0.65)',
+  },
+  accentSheen: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.6,
   },
   modalContainer: {
     flex: 1,
-    paddingTop: Platform.OS === 'ios' ? 48 : 18,
     backgroundColor: '#000',
   },
   modalBlur: {
@@ -229,6 +235,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 48 : 24,
+    left: 0,
+    right: 0,
     zIndex: 10,
   },
   modalCloseBtn: {
@@ -253,9 +263,9 @@ const styles = StyleSheet.create({
   },
   playerWrap: {
     flex: 1,
-    marginTop: 8,
-    marginHorizontal: 8,
-    borderRadius: 12,
+    marginTop: 0,
+    marginHorizontal: 0,
+    borderRadius: 0,
     overflow: 'hidden',
     backgroundColor: '#000',
   },

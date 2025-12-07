@@ -1,31 +1,36 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 export default function PostMovieReview() {
   const router = useRouter();
 
   const handlePostReview = () => {
-    // Navigate to review posting screen
     router.push('/post-review');
   };
 
   return (
-    <TouchableOpacity style={styles.container} onPress={handlePostReview}>
-      {Platform.OS !== 'web' && (
-      <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-      )}
+    <TouchableOpacity style={styles.container} onPress={handlePostReview} activeOpacity={0.9}>
+      <LinearGradient
+        colors={['rgba(229,9,20,0.18)', 'rgba(255,255,255,0.05)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.cardSheen} />
       <View style={styles.content}>
         <View style={styles.iconWrapper}>
-          <Ionicons name="film-outline" size={24} color="#fff" />
+          <Ionicons name="film-outline" size={22} color="#fff" />
         </View>
         <View style={styles.textContent}>
           <Text style={styles.title}>Post Movie Review</Text>
           <Text style={styles.subtitle}>Share your thoughts about a movie</Text>
         </View>
-        <Ionicons name="chevron-forward" size={24} color="#666" />
+        <View style={styles.chevronWrap}>
+          <Ionicons name="chevron-forward" size={20} color="#fff" />
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -35,44 +40,69 @@ const styles = StyleSheet.create({
   container: {
     marginHorizontal: 16,
     marginVertical: 8,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.1)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.14,
     shadowRadius: 24,
     overflow: 'hidden',
-    backgroundColor: Platform.select({
-      web: 'rgba(255,255,255,0.04)',
-      default: 'transparent',
-    }),
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  cardSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 12,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    opacity: 0.6,
   },
   content: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
+    gap: 12,
   },
   iconWrapper: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#ff4b4b',
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: '#e50914',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#e50914',
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
   textContent: {
     flex: 1,
+    gap: 2,
   },
   title: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   subtitle: {
     color: '#999',
     fontSize: 13,
     marginTop: 2,
+  },
+  chevronWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

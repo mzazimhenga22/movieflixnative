@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, ScrollView } from 'react-native';
+import { StyleSheet, View, ScrollView, Text } from 'react-native';
 import { Media, CastMember } from '../../types';
 import MovieHeader from './MovieHeader';
 import MovieInfo from './MovieInfo';
@@ -9,6 +9,7 @@ import EpisodeList from './EpisodeList';
 import CastList from './CastList';
 import { usePStream } from '../../src/pstream/usePStream';
 import { Video } from 'expo-av';
+import { useRouter } from 'expo-router';
 
 interface VideoType {
   key: string;
@@ -42,6 +43,7 @@ const MovieDetailsView: React.FC<Props> = ({
   mediaType,
   cast,
 }) => {
+  const router = useRouter();
   const { loading, error, result: pstreamPlayUrl, scrape } = usePStream();
   const [currentPlayUrl, setCurrentPlayUrl] = useState<string | null>(null);
   const [showPStreamPlayer, setShowPStreamPlayer] = useState(false);
@@ -54,19 +56,7 @@ const MovieDetailsView: React.FC<Props> = ({
   }, [pstreamPlayUrl]);
 
   const handlePlayMovie = async () => {
-    if (!movie) return;
-
-    const mediaTypeScrape = mediaType === 'tv' ? 'show' : 'movie';
-    const tmdbId = String(movie.id);
-
-    await scrape({
-      type: mediaTypeScrape,
-      tmdbId: tmdbId,
-      // For TV shows, you might need to select a default season/episode or allow user to choose
-      // For now, let's assume season 1, episode 1 if it's a TV show and no specific selection is made
-      season: mediaTypeScrape === 'show' ? 1 : undefined,
-      episode: mediaTypeScrape === 'show' ? 1 : undefined,
-    });
+    router.push('/video-player');
   };
 
   const handleClosePlayer = () => {
@@ -83,21 +73,17 @@ const MovieDetailsView: React.FC<Props> = ({
             source={{ uri: currentPlayUrl }}
             useNativeControls
             resizeMode="contain"
-            shouldPlay={true}
-            onPlaybackStatusUpdate={(status) => {
-              if (status.isLoaded && !status.isPlaying) {
-                // Optionally handle end of playback
-              }
-            }}
+            shouldPlay
           />
           <MovieHeader
             movie={movie}
             isLoading={isLoading}
             onWatchTrailer={onWatchTrailer}
-            onBack={handleClosePlayer} // Use handleClosePlayer to exit video and go back
+            onBack={handleClosePlayer}
             onAddToMyList={() => movie && onAddToMyList(movie)}
-            onPlayMovie={handlePlayMovie} // Pass the scraper function
-            isPStreamPlaying={true}
+            onPlayMovie={handlePlayMovie}
+            isPStreamPlaying
+            accentColor="#e50914"
           />
         </View>
       ) : (
@@ -108,14 +94,40 @@ const MovieDetailsView: React.FC<Props> = ({
             onWatchTrailer={onWatchTrailer}
             onBack={onBack}
             onAddToMyList={() => movie && onAddToMyList(movie)}
-            onPlayMovie={handlePlayMovie} // Pass the scraper function
+            onPlayMovie={handlePlayMovie}
             isPStreamPlaying={false}
+            accentColor="#e50914"
           />
-          <MovieInfo movie={movie} isLoading={isLoading} />
-          <TrailerList trailers={trailers} isLoading={isLoading} onWatchTrailer={onWatchTrailer} />
-          {mediaType === 'tv' && <EpisodeList seasons={seasons} />}
-          <RelatedMovies relatedMovies={relatedMovies} isLoading={isLoading} onSelectRelated={onSelectRelated} />
-          <CastList cast={cast} />
+
+          <View style={[styles.section, styles.sectionFirst]}>
+            <MovieInfo movie={movie} isLoading={isLoading} />
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Trailers</Text>
+            <TrailerList trailers={trailers} isLoading={isLoading} onWatchTrailer={onWatchTrailer} />
+          </View>
+
+          {mediaType === 'tv' && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Episodes</Text>
+              <EpisodeList seasons={seasons} />
+            </View>
+          )}
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>More like this</Text>
+            <RelatedMovies
+              relatedMovies={relatedMovies}
+              isLoading={isLoading}
+              onSelectRelated={onSelectRelated}
+            />
+          </View>
+
+          <View style={[styles.section, styles.lastSection]}>
+            <Text style={styles.sectionTitle}>Cast</Text>
+            <CastList cast={cast} />
+          </View>
         </ScrollView>
       )}
     </View>
@@ -125,14 +137,15 @@ const MovieDetailsView: React.FC<Props> = ({
 const styles = StyleSheet.create({
   fullContainer: {
     flex: 1,
-    backgroundColor: '#0f0f10',
+    backgroundColor: 'transparent',
   },
   scrollViewContent: {
-    paddingBottom: 30,
+    paddingBottom: 40,
+    paddingTop: 0,
   },
   videoPlayerContainer: {
     width: '100%',
-    height: 250, // Adjust height as needed for the video player
+    flex: 1,
     backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
@@ -140,6 +153,23 @@ const styles = StyleSheet.create({
   videoPlayer: {
     width: '100%',
     height: '100%',
+  },
+  section: {
+    paddingHorizontal: 18,
+    marginTop: 16,
+  },
+  sectionFirst: {
+    marginTop: -12,
+  },
+  lastSection: {
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    color: '#f5f5f5',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    marginBottom: 8,
   },
 });
 

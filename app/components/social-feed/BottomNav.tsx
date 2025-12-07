@@ -1,38 +1,36 @@
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View, useColorScheme } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function BottomNav() {
   const router = useRouter();
   const pathname = usePathname();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
   const insets = useSafeAreaInsets();
 
+  const isSocialRoute = pathname?.startsWith('/social-feed');
   const isActive = (route: string) => {
     const currentRoute = pathname?.split('/').pop();
     return currentRoute === route || (route === 'index' && currentRoute === 'social-feed');
   };
 
+  // Hide nav on profile screens (any profile path)
+  if (!isSocialRoute || (pathname && /profile/i.test(pathname))) {
+    return null;
+  }
+
   return (
     <View pointerEvents="box-none" style={[styles.outer, { bottom: insets.bottom }]}>
-      <BlurView
-        intensity={80}
-        tint={isDark ? 'dark' : 'light'}
-        style={styles.blurWrap}
-      >
-        <View
-          style={[
-            styles.overlay,
-            {
-              backgroundColor: isDark
-                ? 'rgba(120,20,20,0.18)' // subtle deep red tint in dark mode
-                : 'rgba(255,80,80,0.12)', // lighter tint in light mode
-            },
-          ]}
+      <BlurView intensity={95} tint="dark" style={styles.blurWrap}>
+        <View style={[styles.overlay, { backgroundColor: 'rgba(15,15,25,0.55)' }]} />
+        <LinearGradient
+          colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.02)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.glassSheen}
         />
         <View style={styles.inner}>
           <NavItem
@@ -90,15 +88,24 @@ function NavItem({
       accessibilityRole="button"
       accessibilityState={{ selected: !!active }}
     >
-      <Ionicons
-        name={icon}
-        size={22}
-        color={active ? '#ffd600' : '#fff'}
-      />
-      <Text style={[styles.text, active ? styles.activeText : undefined]}>
-        {label}
-      </Text>
-      {active && <View style={styles.activeDot} />}
+      <View style={[styles.itemInner, active && styles.itemInnerActive]}>
+        {active && (
+          <LinearGradient
+            colors={['#e50914', '#b20710']}
+            start={{ x: 0.05, y: 0 }}
+            end={{ x: 0.95, y: 1 }}
+            style={styles.activePill}
+          />
+        )}
+        <Ionicons
+          name={icon}
+          size={22}
+          color={active ? '#ffffff' : '#f5f5f5'}
+        />
+        <Text style={[styles.text, active ? styles.activeText : undefined]}>
+          {label}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -116,16 +123,22 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     overflow: 'hidden',
     // shadow for depth
-    shadowColor: '#ff4b4b',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
-    elevation: 8,
+    shadowColor: '#0b1736',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    elevation: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    minHeight: 72,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.04)',
+    borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  glassSheen: {
+    ...StyleSheet.absoluteFillObject,
   },
   inner: {
     flexDirection: 'row',
@@ -133,29 +146,44 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 6,
+    minHeight: 68,
   },
   item: {
     alignItems: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 6,
     paddingVertical: 6,
-    minWidth: 56,
+    minWidth: 50,
+  },
+  itemInner: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 16,
+    minWidth: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    gap: 2,
+  },
+  itemInnerActive: {
+    shadowColor: '#e50914',
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
   text: {
     color: '#fff',
-    fontSize: 11,
+    fontSize: 10.5,
     marginTop: 4,
   },
   activeText: {
-    color: '#ffd600',
+    color: '#ffffff',
     fontWeight: '700',
     fontSize: 11,
   },
-  activeDot: {
-    marginTop: 6,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#ffd600',
-    alignSelf: 'center',
+  activePill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 16,
+    opacity: 0.98,
   },
 });

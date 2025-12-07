@@ -192,11 +192,35 @@ const SettingsScreen: React.FC = () => {
 
   return (
     <ScreenWrapper>
+      <LinearGradient
+        colors={['#0f0a1f', '#150a13', '#05060f']}
+        start={[0, 0]}
+        end={[1, 1]}
+        style={styles.gradient}
+      />
+      <LinearGradient
+        colors={['rgba(125,216,255,0.2)', 'rgba(255,255,255,0)']}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={styles.bgOrbPrimary}
+      />
+      <LinearGradient
+        colors={['rgba(113,0,255,0.18)', 'rgba(255,255,255,0)']}
+        start={{ x: 0.8, y: 0 }}
+        end={{ x: 0.2, y: 1 }}
+        style={styles.bgOrbSecondary}
+      />
       <View style={styles.center}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={22} color="white" />
         </TouchableOpacity>
-        <BlurView intensity={50} tint="dark" style={styles.card}>
+        <BlurView intensity={85} tint="dark" style={styles.card}>
+          <LinearGradient
+            colors={['rgba(255,255,255,0.08)', 'rgba(125,216,255,0.1)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.glassSheen}
+          />
           <Text style={styles.header}>Theme Settings</Text>
           <View style={styles.row}>
             <TouchableOpacity style={styles.presetBtn} onPress={() => setDropdownOpen(true)}>
@@ -250,9 +274,33 @@ const SettingsScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  gradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  bgOrbPrimary: {
+    position: 'absolute',
+    width: 380,
+    height: 380,
+    borderRadius: 190,
+    top: -80,
+    left: -50,
+    opacity: 0.6,
+    transform: [{ rotate: '14deg' }],
+  },
+  bgOrbSecondary: {
+    position: 'absolute',
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    bottom: -100,
+    right: -30,
+    opacity: 0.55,
+    transform: [{ rotate: '-12deg' }],
+  },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12 },
   backButton: { position: 'absolute', top: 52, left: 18, zIndex: 10, padding: 8, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.08)' },
-  card: { width: Math.min(width * 0.94, 760), borderRadius: 16, padding: 18, backgroundColor: 'rgba(255,255,255,0.04)' },
+  card: { width: Math.min(width * 0.94, 760), borderRadius: 16, padding: 18, backgroundColor: 'rgba(255,255,255,0.035)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', overflow: 'hidden', shadowColor: '#7dd8ff', shadowOpacity: 0.2, shadowRadius: 16, shadowOffset: { width: 0, height: 10 }, elevation: 10 },
+  glassSheen: { ...StyleSheet.absoluteFillObject, opacity: 0.9 },
   header: { color: '#fff', fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 12 },
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   presetBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.03)' },

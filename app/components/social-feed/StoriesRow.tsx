@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
   useWindowDimensions,
+  Image,
 } from 'react-native';
 import { onStoriesUpdate } from './storiesController';
 
@@ -24,7 +25,33 @@ export default function StoriesRow({ showAddStory = false }: Props) {
   const avatarInner = Math.round(itemSize * 0.78); // inner avatar size
 
   useEffect(() => {
-    const unsubscribe = onStoriesUpdate(setStories);
+    const unsubscribe = onStoriesUpdate((rawStories) => {
+      const grouped: Record<string, any[]> = {};
+      rawStories.forEach((s) => {
+        const uid = s.userId || 'unknown';
+        if (!grouped[uid]) grouped[uid] = [];
+        grouped[uid].push(s);
+      });
+
+      const circles = Object.values(grouped).map((list) => {
+        // sort by createdAt if available, newest last
+        const sorted = [...list].sort((a, b) => {
+          const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          return ta - tb;
+        });
+        const first = sorted[0];
+        const last = sorted[sorted.length - 1];
+        return {
+          id: first.id, // use first story id as entry point
+          userId: first.userId,
+          username: first.username,
+          photoURL: last.photoURL, // show thumbnail from latest story
+        };
+      });
+
+      setStories(circles);
+    });
     return () => unsubscribe();
   }, []);
 
@@ -70,10 +97,23 @@ export default function StoriesRow({ showAddStory = false }: Props) {
             activeOpacity={0.92}
             accessibilityRole="button"
             accessibilityLabel={`${story.username}'s story`}
+            onPress={() =>
+              router.push(
+                `/story/${story.id}?photoURL=${encodeURIComponent(story.photoURL ?? '')}`
+              )
+            }
           >
             <View style={[styles.ring, { width: itemSize, height: itemSize, borderRadius: itemSize / 2 }]}>
               <View style={[styles.avatarInnerWrap, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]}>
-                <View style={[styles.avatar, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]} />
+                {story.photoURL ? (
+                  <Image
+                    source={{ uri: story.photoURL }}
+                    style={[styles.avatarImage, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={[styles.avatar, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]} />
+                )}
               </View>
             </View>
             <Text style={styles.storyText} numberOfLines={1} ellipsizeMode="tail">
@@ -120,6 +160,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  avatarImage: {
+    backgroundColor: '#111',
   },
   avatar: {
     backgroundColor: '#2f2f2f',

@@ -25,6 +25,7 @@ interface Props {
   onAddToMyList: () => void;
   onPlayMovie: () => void; // New prop for playing movie via p-stream
   isPStreamPlaying: boolean; // New prop to indicate if p-stream is playing
+  accentColor: string;
 }
 
 const MovieHeader: React.FC<Props> = ({
@@ -35,16 +36,31 @@ const MovieHeader: React.FC<Props> = ({
   onAddToMyList,
   onPlayMovie,
   isPStreamPlaying,
+  accentColor,
 }) => {
   const backdropUri = movie ? `${IMAGE_BASE_URL}${movie.backdrop_path || movie.poster_path}` : null;
 
   return (
     <View style={styles.backdropContainer}>
+      <LinearGradient
+        colors={[accentColor, '#0a0f1f', '#05060f']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.baseGradient}
+        pointerEvents="none"
+      />
       {backdropUri ? (
         <Image source={{ uri: backdropUri }} style={styles.backdropImage} />
       ) : (
         <PulsePlaceholder style={styles.backdropPlaceholder} />
       )}
+      <LinearGradient
+        colors={['rgba(5,6,15,0.12)', 'rgba(5,6,15,0.6)', 'rgba(5,6,15,0.96)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.backdropTint}
+        pointerEvents="none"
+      />
 
       <View style={styles.topBar}>
         <TouchableOpacity onPress={onBack} style={styles.backButton}>
@@ -61,29 +77,46 @@ const MovieHeader: React.FC<Props> = ({
       </View>
 
       <LinearGradient
-        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)', '#0f0f10']}
-        locations={[0, 0.55, 1]}
+        colors={['rgba(5,6,15,0)', 'rgba(5,6,15,0.6)', '#05060f']}
+        locations={[0, 0.5, 1]}
         style={styles.gradientOverlay}
+        pointerEvents="none"
       />
 
-      <TouchableOpacity style={styles.mainPlayButton} onPress={isPStreamPlaying ? onBack : onPlayMovie}> {/* Conditionally call onBack or onPlayMovie */}
+      <TouchableOpacity
+        style={styles.mainPlayButton}
+        onPress={isPStreamPlaying ? onBack : onPlayMovie}
+        accessibilityLabel={isPStreamPlaying ? 'Close player' : 'Play movie'}
+      >
         <View style={styles.mainPlayOuter}>
-          <FontAwesome name={isPStreamPlaying ? "compress" : "play-circle"} size={66} color="rgba(255,255,255,0.9)" />
+          <FontAwesome
+            name={isPStreamPlaying ? 'compress' : 'play-circle'}
+            size={66}
+            color="rgba(255,255,255,0.96)"
+          />
         </View>
       </TouchableOpacity>
 
       <View style={styles.actionButtonsContainer}>
-        {['share-alt', 'plus', 'download', 'star'].map((name, i) => (
+        {[
+          { key: 'trailer', icon: 'play', label: 'Trailer' },
+          { key: 'my-list', icon: 'plus', label: 'My List' },
+          { key: 'download', icon: 'download', label: 'Download' },
+          { key: 'rate', icon: 'star', label: 'Rate' },
+        ].map((btn, i) => (
           <TouchableOpacity
             key={i}
             style={styles.actionItem}
             onPress={() => {
-              if (name === 'plus') {
+              if (btn.key === 'my-list') {
                 onAddToMyList();
+              } else if (btn.key === 'trailer') {
+                onWatchTrailer();
               }
             }}
           >
-            <FontAwesome name={name as any} size={20} color="white" />
+            <FontAwesome name={btn.icon as any} size={18} color="white" />
+            <Text style={styles.actionLabel}>{btn.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
@@ -99,6 +132,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
+    backgroundColor: '#05060f',
   },
   backdropImage: {
     width: '100%',
@@ -109,6 +143,12 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     position: 'absolute',
+  },
+  baseGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  backdropTint: {
+    ...StyleSheet.absoluteFillObject,
   },
   gradientOverlay: {
     position: 'absolute',
@@ -133,7 +173,7 @@ const styles = StyleSheet.create({
     left: 16,
     top: 0,
     zIndex: 30,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.18)',
     padding: 6,
     borderRadius: 18,
   },
@@ -173,18 +213,22 @@ const styles = StyleSheet.create({
     width: '86%',
     flexDirection: 'row',
     justifyContent: 'space-around',
-    backgroundColor: 'rgba(75, 0, 0, 0.45)',
+    backgroundColor: 'rgba(5,6,15,0.6)',
     borderRadius: 28,
     paddingVertical: 12,
     paddingHorizontal: 6,
     zIndex: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.03)',
   },
   actionItem: {
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
+    gap: 4,
+  },
+  actionLabel: {
+    color: '#f5f5f5',
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
 

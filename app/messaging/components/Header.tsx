@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, Animated, TouchableOpacity, StyleSheet, TextInput, Platform } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface HeaderProps {
   scrollY: Animated.Value;
@@ -11,38 +13,38 @@ interface HeaderProps {
 }
 
 const Header = ({ scrollY, onSettingsPress, onSearchChange, searchQuery, headerHeight }: HeaderProps) => {
-  const headerTranslateY = scrollY.interpolate({
-    inputRange: [0, headerHeight],
-    outputRange: [0, -headerHeight + (Platform.OS === 'ios' ? 20 : 12)],
-    extrapolate: 'clamp',
-  });
-
-  const titleOpacity = scrollY.interpolate({
-    inputRange: [0, headerHeight / 2],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
   return (
-    <Animated.View style={[styles.header, { height: headerHeight, transform: [{ translateY: headerTranslateY }] }]}>
-      <View style={styles.topRow}>
-        <Animated.Text style={[styles.title, { opacity: titleOpacity }]}>Messages</Animated.Text>
-        <TouchableOpacity onPress={onSettingsPress} style={styles.iconBtn}>
-          <Ionicons name="settings-outline" size={22} color="white" />
-        </TouchableOpacity>
-      </View>
+    <Animated.View style={[styles.header, { height: headerHeight }]}>
+      <LinearGradient
+        colors={['rgba(229,9,20,0.28)', 'rgba(10,12,24,0.96)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        <BlurView intensity={60} tint="dark" style={styles.headerGlass}>
+          <View style={styles.topRow}>
+            <View>
+              <Text style={styles.eyebrow}>Chats</Text>
+              <Text style={styles.title}>Messages</Text>
+            </View>
+            <TouchableOpacity onPress={onSettingsPress} style={styles.iconBtn}>
+              <Ionicons name="settings-outline" size={22} color="white" />
+            </TouchableOpacity>
+          </View>
 
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={18} color="#a3a3a3" style={{ marginRight: 10 }} />
-        <TextInput
-          placeholder="Search messages or people"
-          placeholderTextColor="#a3a3a3"
-          style={styles.searchInput}
-          value={searchQuery}
-          onChangeText={onSearchChange}
-          returnKeyType="search"
-        />
-      </View>
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={18} color="#a3a3a3" style={{ marginRight: 10 }} />
+            <TextInput
+              placeholder="Search messages or people"
+              placeholderTextColor="#a3a3a3"
+              style={styles.searchInput}
+              value={searchQuery}
+              onChangeText={onSearchChange}
+              returnKeyType="search"
+            />
+          </View>
+        </BlurView>
+      </LinearGradient>
     </Animated.View>
   );
 };
@@ -54,9 +56,27 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     zIndex: 999,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingTop: Platform.OS === 'ios' ? 16 : 12,
     justifyContent: 'flex-end',
+    backgroundColor: 'transparent',
+  },
+  headerGradient: {
+    flex: 1,
+    borderRadius: 18,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+  },
+  headerGlass: {
+    flex: 1,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 0,
+    borderColor: 'transparent',
     backgroundColor: 'transparent',
   },
   topRow: {
@@ -65,6 +85,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 10,
     paddingRight: 6,
+  },
+  eyebrow: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.72)',
+    letterSpacing: 0.4,
   },
   title: {
     fontSize: 28,

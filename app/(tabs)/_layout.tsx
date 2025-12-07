@@ -12,20 +12,20 @@ export default function TabLayout(): React.ReactElement {
 
   return (
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: '#ffd600',
-        tabBarInactiveTintColor: isDark ? '#fff' : '#fff',
-        tabBarShowLabel: false,
-        tabBarStyle: { display: 'none' },
-      }}
-      tabBar={(props) => <BottomNav {...props} insetsBottom={insets.bottom} isDark={isDark} />}
-    >
-      <Tabs.Screen name="movies" options={{ title: 'Home' }} />
-      <Tabs.Screen name="categories" options={{ title: 'Categories' }} />
-      <Tabs.Screen name="search" options={{ title: 'Search' }} />
-      <Tabs.Screen name="downloads" options={{ title: 'Downloads' }} />
-      <Tabs.Screen name="interactive" options={{ title: 'More' }} />
-    </Tabs>
+        screenOptions={{
+          headerShown: false,
+          tabBarActiveTintColor: '#ffd600',
+          tabBarInactiveTintColor: isDark ? '#fff' : '#fff',
+          tabBarShowLabel: false,
+          tabBarStyle: { display: 'none' },
+        }}
+        tabBar={(props) => <BottomNav {...props} insetsBottom={insets.bottom} isDark={isDark} />}
+      >
+        <Tabs.Screen name="movies" options={{ title: 'Home' }} />
+        <Tabs.Screen name="categories" options={{ title: 'Categories' }} />
+        <Tabs.Screen name="search" options={{ title: 'Search' }} />
+        <Tabs.Screen name="downloads" options={{ title: 'Downloads' }} />
+        <Tabs.Screen name="interactive" options={{ title: 'More' }} />
+      </Tabs>
   );
 }

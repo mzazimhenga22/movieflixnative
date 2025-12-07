@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, Image, Animated, Easing, TouchableOpacity } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 
 interface StoryMedia {
@@ -25,7 +26,8 @@ const StoryComponent: React.FC<StoryProps> = ({ stories }) => {
 
   useEffect(() => {
     // When stories change, trigger the animation
-    slideAnim.setValue(100); // Start from below
+    // Start a bit lower for a more noticeable entrance, but stay within the rail area
+    slideAnim.setValue(40);
     Animated.timing(slideAnim, {
       toValue: 0,
       duration: 500,
@@ -46,47 +48,100 @@ const StoryComponent: React.FC<StoryProps> = ({ stories }) => {
 
   return (
     <View style={styles.container}>
-      <Animated.View style={[styles.storiesContainer, { transform: [{ translateY: slideAnim }] }]}>
-        {displayedStories.map((story) => (
-          <TouchableOpacity key={story.id} style={styles.storyContainer} onPress={() => handleStoryPress(story)}>
-            <Image source={{ uri: story.image }} style={styles.storyImage} />
-            <Text style={styles.storyText} numberOfLines={1} ellipsizeMode="tail">
-              {story.title}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </Animated.View>
+      <LinearGradient
+        colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.02)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.rail}
+      >
+        <View style={styles.railSheen} pointerEvents="none" />
+        <View style={styles.railGlow} pointerEvents="none" />
+        <Animated.View style={[styles.storiesContainer, { transform: [{ translateY: slideAnim }] }]}>
+          {displayedStories.map((story) => (
+            <TouchableOpacity key={story.id} style={styles.storyContainer} onPress={() => handleStoryPress(story)}>
+              <View style={styles.storyImageWrapper}>
+                <Image source={{ uri: story.image }} style={styles.storyImage} />
+              </View>
+              <Text style={styles.storyText} numberOfLines={1} ellipsizeMode="tail">
+                {story.title}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </Animated.View>
+      </LinearGradient>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    height: 100, // Fixed height for clipping
-    overflow: 'hidden', // Clip the animation
+    height: 140,
     paddingVertical: 10,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  rail: {
+    borderRadius: 22,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    overflow: 'visible', // allow bottom glow to show fully
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    backgroundColor: 'rgba(10,12,24,0.25)', // more transparent to blend with hero
+  },
+  railSheen: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    opacity: 0.28,
+  },
+  railGlow: {
+    position: 'absolute',
+    bottom: -6,
+    left: 24,
+    right: 24,
+    height: 10,
+    borderRadius: 22,
+    backgroundColor: 'rgba(229,9,20,0.35)',
   },
   storiesContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around', // Distribute stories evenly
+    justifyContent: 'space-between',
     width: '100%',
+    gap: 12,
   },
   storyContainer: {
     alignItems: 'center',
-    width: 80, // Give each story a fixed width
+    width: 78, // Give each story a fixed width
+    gap: 8,
+  },
+  storyImageWrapper: {
+    padding: 7,
+    borderRadius: 42,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: 'rgba(125,216,255,0.18)',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
   },
   storyImage: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    borderWidth: 2,
-    borderColor: '#FF4500',
+    width: 62,
+    height: 62,
+    borderRadius: 31,
   },
   storyText: {
-    color: 'white',
-    marginTop: 5,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '600',
     fontSize: 12,
     textAlign: 'center',
+    letterSpacing: 0.1,
   },
 });
 

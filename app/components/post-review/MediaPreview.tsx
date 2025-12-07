@@ -24,7 +24,6 @@ import ScreenWrapper from '../../../components/ScreenWrapper';
 import MediaContent, { MediaContentHandle } from './media-preview/MediaContent';
 import UserHeader from './media-preview/UserHeader';
 import ActionButtons from './media-preview/ActionButtons';
-import { User } from '@supabase/supabase-js';
 
 const { height: WINDOW_HEIGHT, width: WINDOW_WIDTH } = Dimensions.get('window');
 
@@ -34,7 +33,6 @@ interface MediaPreviewProps {
   onClose?: () => void;
   initialReviewData?: ReviewData;
   isEditing?: boolean;
-  user?: User | null;
 }
 
 interface ReviewData {
@@ -51,7 +49,6 @@ export default function MediaPreview({
   onClose,
   initialReviewData,
   isEditing = false,
-  user,
 }: MediaPreviewProps) {
   const [reviewData, setReviewData] = useState<ReviewData>(
     initialReviewData || { rating: 0, review: '', title: '' }
@@ -160,7 +157,7 @@ export default function MediaPreview({
               onMediaScaleChange={mediaScale}
             />
 
-            <UserHeader onClose={handleClose} insets={insets} user={user} />
+            <UserHeader onClose={handleClose} insets={insets} />
 
             {isPosting && (
               <View style={[styles.logsContainer, { top: 56 + (Platform.OS === 'android' ? 12 : 0) }]}>

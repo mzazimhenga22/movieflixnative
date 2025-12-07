@@ -12,6 +12,8 @@ import {
   where,
   getDocs,
   limit,
+  arrayUnion,
+  arrayRemove,
 } from 'firebase/firestore';
 import { firestore, authPromise } from '../../constants/firebase';
 import {
@@ -21,12 +23,17 @@ import {
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { getDatabase, ref, onValue, set, onDisconnect } from "firebase/database";
+import { deleteDoc } from 'firebase/firestore';
 
 // ---- Types ----
 export type Conversation = {
   id: string;
   lastMessage?: string;
   updatedAt?: any;
+  lastMessageSenderId?: string;
+  lastMessageHasMedia?: boolean;
+  pinned?: boolean;
+  muted?: boolean;
   [key: string]: any;
 };
 
@@ -35,6 +42,13 @@ export type Message = {
   text?: string;
   createdAt?: any;
   from?: string;
+  replyToMessageId?: string;
+  replyToText?: string;
+  replyToSenderId?: string;
+  deleted?: boolean;
+  deletedFor?: string[];
+  pinnedBy?: string[];
+  editedAt?: any;
   [key: string]: any;
 };
 
@@ -43,6 +57,7 @@ export type Profile = {
   displayName: string;
   photoURL: string;
   status?: string;
+  isTyping?: boolean;
 };
 
 type AuthCallback = (user: User | null) => void;
@@ -159,6 +174,30 @@ export const onAuthChange = (callback: AuthCallback): UnsubscribeFn => {
   return () => unsub();
 };
 
+// --- Typing indicator helpers (Realtime DB) ---
+const realtimeDb = getDatabase();
+
+export const onUserTyping = (
+  conversationId: string,
+  userId: string,
+  callback: (typing: boolean) => void
+): UnsubscribeFn => {
+  const typingRef = ref(realtimeDb, `/typing/${conversationId}/${userId}`);
+  const unsubscribe = onValue(typingRef, (snap) => {
+    callback(!!snap.val());
+  });
+  return () => unsubscribe();
+};
+
+export const setTyping = async (
+  conversationId: string,
+  userId: string,
+  typing: boolean
+): Promise<void> => {
+  const typingRef = ref(realtimeDb, `/typing/${conversationId}/${userId}`);
+  await set(typingRef, typing);
+};
+
 // --- Firestore subscriptions (unchanged behavior but typed & logged) ---
 export const onConversationUpdate = (conversationId: string, callback: (conv: Conversation) => void): UnsubscribeFn => {
   const docRef = doc(firestore, 'conversations', conversationId);
@@ -220,16 +259,168 @@ export const sendMessage = async (conversationId: string, message: Partial<Messa
   if (!auth?.currentUser) return;
 
   const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages');
-  await addDoc(messagesColRef, {
+  const newDoc = await addDoc(messagesColRef, {
     ...message,
+    from: auth.currentUser.uid,
     createdAt: serverTimestamp(),
   });
 
   const conversationDocRef = doc(firestore, 'conversations', conversationId);
   await setDoc(conversationDocRef, {
     lastMessage: (message as any).text ?? '',
+    lastMessageSenderId: auth.currentUser.uid,
     updatedAt: serverTimestamp(),
   }, { merge: true });
+};
+
+export const deleteMessageForMe = async (
+  conversationId: string,
+  messageId: string,
+  userId: string,
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
+  await setDoc(
+    messageDocRef,
+    {
+      deletedFor: arrayUnion(userId),
+    },
+    { merge: true },
+  );
+
+  await recomputeConversationLastMessage(conversationId, userId);
+};
+
+export const deleteMessageForAll = async (
+  conversationId: string,
+  messageId: string,
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
+  await setDoc(
+    messageDocRef,
+    {
+      deleted: true,
+    },
+    { merge: true },
+  );
+
+  await recomputeConversationLastMessage(conversationId);
+};
+
+export const pinMessage = async (
+  conversationId: string,
+  messageId: string,
+  userId: string,
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
+  await setDoc(
+    messageDocRef,
+    {
+      pinnedBy: arrayUnion(userId),
+    },
+    { merge: true },
+  );
+};
+
+export const unpinMessage = async (
+  conversationId: string,
+  messageId: string,
+  userId: string,
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
+  await setDoc(
+    messageDocRef,
+    {
+      pinnedBy: arrayRemove(userId),
+    },
+    { merge: true },
+  );
+};
+
+export const editMessage = async (
+  conversationId: string,
+  messageId: string,
+  newText: string,
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
+  await setDoc(
+    messageDocRef,
+    {
+      text: newText,
+      editedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
+
+  await recomputeConversationLastMessage(conversationId);
+};
+
+export const setConversationPinned = async (conversationId: string, pinned: boolean): Promise<void> => {
+  const conversationDocRef = doc(firestore, 'conversations', conversationId);
+  await setDoc(conversationDocRef, { pinned }, { merge: true });
+};
+
+export const markConversationRead = async (conversationId: string): Promise<void> => {
+  const conversationDocRef = doc(firestore, 'conversations', conversationId);
+  await setDoc(
+    conversationDocRef,
+    {
+      lastMessageSenderId: null,
+    },
+    { merge: true },
+  );
+};
+
+export const deleteConversation = async (conversationId: string): Promise<void> => {
+  const conversationDocRef = doc(firestore, 'conversations', conversationId);
+  await deleteDoc(conversationDocRef);
+};
+
+const recomputeConversationLastMessage = async (
+  conversationId: string,
+  viewerId?: string,
+): Promise<void> => {
+  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages');
+  const qLatest = query(messagesColRef, orderBy('createdAt', 'desc'), limit(20));
+  const snapshot = await getDocs(qLatest);
+
+  let latest: Message | null = null;
+  snapshot.forEach((docSnap) => {
+    const data = { id: docSnap.id, ...(docSnap.data() as any) } as Message;
+    if (data.deleted) {
+      return;
+    }
+    if (viewerId && Array.isArray(data.deletedFor) && data.deletedFor.includes(viewerId)) {
+      return;
+    }
+    if (!latest) {
+      latest = data;
+    }
+  });
+
+  const conversationDocRef = doc(firestore, 'conversations', conversationId);
+
+  if (!latest) {
+    await setDoc(
+      conversationDocRef,
+      {
+        lastMessage: '',
+        lastMessageSenderId: null,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return;
+  }
+
+  await setDoc(
+    conversationDocRef,
+    {
+      lastMessage: latest.text ?? '',
+      lastMessageSenderId: latest.from ?? latest.sender ?? null,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true },
+  );
 };
 
 export const getFollowing = async (): Promise<Profile[]> => {
@@ -250,7 +441,38 @@ export const getFollowing = async (): Promise<Profile[]> => {
 };
 
 export const getSuggestedPeople = async (): Promise<Profile[]> => {
-  return await getFollowing();
+  const auth = await getAuth();
+  if (!auth?.currentUser) return [];
+
+  // Load current user's following
+  const userDocRef = doc(firestore, 'users', auth.currentUser.uid);
+  const userDoc = await getDoc(userDocRef);
+  const followingIds: string[] = userDoc.data()?.following || [];
+
+  // Base query: users who are not me
+  const usersRef = collection(firestore, 'users');
+  const q = query(usersRef, limit(50));
+  const snapshot = await getDocs(q);
+
+  // Map to profiles with followerCount and sort by that
+  const candidates: Profile & { followerCount?: number }[] = snapshot.docs
+    .map((docSnap) => {
+      const data = docSnap.data() as any;
+      return {
+        id: docSnap.id,
+        displayName: data.displayName,
+        photoURL: data.photoURL,
+        status: data.status,
+        isTyping: false,
+        followerCount: Array.isArray(data.followers) ? data.followers.length : data.followersCount ?? 0,
+      };
+    })
+    .filter((p) => p.id !== auth.currentUser!.uid && !followingIds.includes(p.id));
+
+  candidates.sort((a, b) => (b.followerCount || 0) - (a.followerCount || 0));
+
+  // Return top 10 suggested people
+  return candidates.slice(0, 10);
 };
 
 export const updateConversationStatus = async (conversationId: string, status: string): Promise<void> => {
@@ -258,6 +480,30 @@ export const updateConversationStatus = async (conversationId: string, status: s
   await setDoc(conversationDocRef, {
     status: status,
   }, { merge: true });
+};
+
+export const createGroupConversation = async (options: {
+  name: string;
+  memberIds: string[];
+  avatarUrl?: string | null;
+}): Promise<string> => {
+  const auth = await getAuth();
+  if (!auth?.currentUser) throw new Error('User not authenticated');
+
+  const uniqueMembers = Array.from(new Set([auth.currentUser.uid, ...options.memberIds]));
+
+  const conversationsRef = collection(firestore, 'conversations');
+  const newConversation = await addDoc(conversationsRef, {
+    isGroup: true,
+    name: options.name || 'Group',
+    avatarUrl: options.avatarUrl || null,
+    members: uniqueMembers,
+    updatedAt: serverTimestamp(),
+    lastMessage: '',
+    status: 'active',
+  });
+
+  return newConversation.id;
 };
 
 export const findOrCreateConversation = async (otherUser: Profile): Promise<string> => {

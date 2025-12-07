@@ -13,3 +13,6 @@ export const onStoriesUpdate = (callback: (stories: any[]) => void) => {
 
   return unsubscribe;
 };
+
+// dummy default export for expo-router route scanning
+export default {};

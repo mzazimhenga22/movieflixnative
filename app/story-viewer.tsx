@@ -9,9 +9,9 @@ import {
   Easing,
   Image,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import PagerView from 'react-native-pager-view';
 import { Video, ResizeMode } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +27,7 @@ type Story = { id: number; title: string; image: string; media: StoryMedia[] };
 const StoryViewerScreen = () => {
   const router = useRouter();
   const { stories: storiesParam, initialStoryId: initialStoryIdParam } = useLocalSearchParams();
+  const isWeb = Platform.OS === 'web';
 
   const stories: Story[] = storiesParam ? JSON.parse(storiesParam as string) : [];
   const initialStoryId: number = initialStoryIdParam ? parseInt(initialStoryIdParam as string) : 0;
@@ -40,13 +41,43 @@ const StoryViewerScreen = () => {
     );
   }
 
+  // Web fallback: avoid native pager-view; show simple first story view
+  if (isWeb) {
+    const webStory = stories[initialStoryIndex] ?? stories[0];
+    const webMedia = webStory?.media?.[0];
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={{ padding: 16 }}>
+          <Text style={{ color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 8 }}>
+            {webStory?.title || 'Story'}
+          </Text>
+          {webMedia?.type === 'image' ? (
+            <Image source={{ uri: webMedia.uri }} style={{ width: '100%', height: 320 }} resizeMode="cover" />
+          ) : webMedia?.type === 'video' ? (
+            <Video
+              source={{ uri: webMedia.uri }}
+              style={{ width: '100%', height: 320, backgroundColor: '#000' }}
+              resizeMode={ResizeMode.CONTAIN}
+              useNativeControls
+              shouldPlay
+            />
+          ) : (
+            <Text style={{ color: '#aaa' }}>No media to show.</Text>
+          )}
+          <Text style={{ color: '#aaa', marginTop: 12 }}>Stories carousel is disabled on web.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const initialStoryIndex = Math.max(0, stories.findIndex((s) => s.id === initialStoryId));
   const [currentStoryIndex, setCurrentStoryIndex] = useState(initialStoryIndex);
   const [currentMediaIndex, setCurrentMediaIndex] = useState(0);
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
   const [videoLoading, setVideoLoading] = useState(true);
 
-  const pagerRef = useRef<PagerView>(null);
+  const PagerView = isWeb ? null : require('react-native-pager-view').default;
+  const pagerRef = useRef<any>(null);
   const videoRef = useRef<Video>(null);
   const webviewRef = useRef<any>(null);
 

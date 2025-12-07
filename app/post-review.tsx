@@ -1,46 +1,55 @@
-
 import React, { useState } from 'react';
 import { View, StyleSheet, Alert } from 'react-native';
 import MediaPicker from './components/post-review/MediaPicker';
 import MediaPreview from './components/post-review/MediaPreview';
-import { useNavigation } from '@react-navigation/native';
-import { supabase } from '../constants/supabase';
+import { supabase, supabaseConfigured } from '../constants/supabase';
 import { decode, encode } from 'base-64';
 import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useUser } from '../hooks/use-user';
+import { useRouter } from 'expo-router';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { firestore } from '../constants/firebase';
 
 if (typeof atob === 'undefined') {
+  // @ts-ignore
   global.atob = decode;
 }
 if (typeof btoa === 'undefined') {
+  // @ts-ignore
   global.btoa = (str: string) => encode(str);
 }
 
 export default function PostReviewScreen() {
   const [media, setMedia] = useState<{ uri: string; type: 'image' | 'video' } | null>(null);
-  const navigation = useNavigation();
+  const router = useRouter();
   const { user } = useUser();
+  const fallbackUser = { uid: 'dev-user' }; // allow uploads in Expo Go when not authenticated
+  const effectiveUser = user ?? fallbackUser;
 
   const handleMediaPick = (uri: string, type: 'image' | 'video') => {
     setMedia({ uri, type });
   };
 
   const handlePost = async (reviewData: any) => {
-    if (!media) return;
-    if (!user) {
-      Alert.alert('Please sign in', 'You must be signed in to post.');
+    if (!media) {
+      Alert.alert('No media selected', 'Please pick a photo or video to post.');
+      return;
+    }
+    if (!supabaseConfigured) {
+      Alert.alert('Missing configuration', 'Supabase is not configured. Add your Supabase keys and try again.');
+      return;
+    }
+    if (!effectiveUser?.uid) {
+      Alert.alert('Not signed in', 'Please sign in before posting.');
       return;
     }
 
     try {
-      const onProgress = typeof reviewData?.onProgress === 'function' ? reviewData.onProgress : undefined;
-      onProgress?.('Preparing media...');
-
       let finalUri = media.uri;
       let contentType = media.type === 'image' ? 'image/jpeg' : 'video/mp4';
 
-      // ✅ Optimize images before upload
+      // Optimize images before upload
       if (media.type === 'image' && media.uri.startsWith('file://')) {
         const manipResult = await manipulateAsync(
           media.uri,
@@ -50,19 +59,36 @@ export default function PostReviewScreen() {
         finalUri = manipResult.uri;
       }
 
-      // ✅ Read file as Base64
-      onProgress?.('Reading file...');
-      const base64Data = await FileSystem.readAsStringAsync(finalUri, { encoding: 'base64' });
-      const fileBuffer = decode(base64Data);
+      // Read file as Base64 and prepare binary payload for Supabase
+      const readLocalFile = async (uri: string) => {
+        const base64Data = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+        const binary = decode(base64Data);
+        return Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer;
+      };
+
+      const fetchRemoteFile = async (uri: string) => {
+        const res = await fetch(uri);
+        const buf = await res.arrayBuffer();
+        // try to infer content-type if available
+        const ct = res.headers.get('content-type');
+        return { buffer: buf, contentType: ct || contentType };
+      };
+
+      let fileBuffer: ArrayBuffer;
+      if (finalUri.startsWith('http')) {
+        const remote = await fetchRemoteFile(finalUri);
+        fileBuffer = remote.buffer;
+        contentType = remote.contentType || contentType;
+      } else {
+        fileBuffer = await readLocalFile(finalUri);
+      }
 
       const rawName = finalUri.split('/').pop() || `upload-${Date.now()}`;
-      const fileName = `${user.id}/${Date.now()}-${rawName}`.replace(/\s+/g, '_');
+      const fileName = `${effectiveUser.uid}/${Date.now()}-${rawName}`.replace(/\s+/g, '_');
 
-      onProgress?.('Uploading to Supabase (feeds bucket)...');
-
-      // ✅ Upload directly to Supabase Storage (feeds bucket)
+      // Upload directly to Supabase Storage (feeds bucket)
       const { data, error } = await supabase.storage
-        .from('feeds') // ← updated bucket name
+        .from('feeds')
         .upload(fileName, fileBuffer, {
           contentType,
           upsert: true,
@@ -70,16 +96,32 @@ export default function PostReviewScreen() {
 
       if (error) throw error;
 
-      // ✅ Get public URL (if bucket is public)
+      // Get public URL (if bucket is public)
       const { data: publicUrl } = supabase.storage.from('feeds').getPublicUrl(fileName);
 
-      onProgress?.('Upload complete!');
-      Alert.alert('Success', 'Your media has been uploaded.');
+      // Store review metadata in Firestore so social feed can display it
+      try {
+        await addDoc(collection(firestore, 'reviews'), {
+          userId: effectiveUser.uid,
+          review: reviewData.review ?? '',
+          title: reviewData.title ?? '',
+          rating: reviewData.rating ?? 0,
+          mediaUrl: publicUrl.publicUrl,
+          type: media.type,
+          videoUrl: media.type === 'video' ? publicUrl.publicUrl : null,
+          createdAt: serverTimestamp(),
+          likes: 0,
+          commentsCount: 0,
+        });
+      } catch (metaError: any) {
+        console.warn('Failed to save review metadata to Firestore', metaError);
+        Alert.alert('Upload issue', 'Media uploaded but failed to save review details. Please try again.');
+        return;
+      }
 
-      console.log('✅ Uploaded file:', data);
-      console.log('🌐 Public URL:', publicUrl.publicUrl);
-
-      navigation.navigate('social-feed' as never);
+      Alert.alert('Success', 'Your review has been posted.');
+      console.log('Uploaded file:', data);
+      console.log('Public URL:', publicUrl.publicUrl);
     } catch (error: any) {
       console.error('Upload error:', error);
       Alert.alert('Upload failed', error.message || 'Please try again.');
@@ -89,9 +131,22 @@ export default function PostReviewScreen() {
   return (
     <View style={styles.container}>
       {!media ? (
-        <MediaPicker onMediaPicked={handleMediaPick} onClose={() => navigation.goBack()} />
+        <MediaPicker
+          onMediaPicked={handleMediaPick}
+          // Do not navigate away when the picker closes; just stay here
+          // so selecting/cancelling media never kicks you back to the feed.
+          onClose={() => setMedia(null)}
+        />
       ) : (
-        <MediaPreview media={media} onPost={handlePost} user={user} />
+        <MediaPreview
+          media={media}
+          onPost={handlePost}
+          onClose={() => {
+            // When closing from the preview, clear media and go back once.
+            setMedia(null);
+            router.back();
+          }}
+        />
       )}
     </View>
   );

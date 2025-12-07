@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -7,18 +7,55 @@ import {
   Image,
   TouchableOpacity,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { IMAGE_BASE_URL } from '@/constants/api';
 import { Media } from '@/types';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface MovieListProps {
   title: string;
   movies: Media[];
   carousel?: boolean; // Make carousel optional
+  onItemPress?: (item: Media) => void;
 }
 
-const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true }) => {
+const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true, onItemPress }) => {
   const router = useRouter();
+  const [myListIds, setMyListIds] = useState<number[]>([]);
+
+  useEffect(() => {
+    const loadMyList = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('myList');
+        if (stored) {
+          const parsed: Media[] = JSON.parse(stored);
+          setMyListIds(parsed.map((m) => m.id));
+        }
+      } catch (err) {
+        console.error('Failed to load My List', err);
+      }
+    };
+    loadMyList();
+  }, []);
+
+  const toggleMyList = async (item: Media) => {
+    try {
+      const stored = await AsyncStorage.getItem('myList');
+      const existing: Media[] = stored ? JSON.parse(stored) : [];
+      const exists = existing.find((m) => m.id === item.id);
+      let updated: Media[];
+      if (exists) {
+        updated = existing.filter((m) => m.id !== item.id);
+      } else {
+        updated = [...existing, item];
+      }
+      setMyListIds(updated.map((m) => m.id));
+      await AsyncStorage.setItem('myList', JSON.stringify(updated));
+    } catch (err) {
+      console.error('Failed to update My List', err);
+    }
+  };
 
   const handlePress = (movieId: number, mediaType: 'movie' | 'tv' | undefined) => {
     router.push(`/details/${movieId}?mediaType=${mediaType || 'movie'}`);
@@ -30,23 +67,61 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true })
   }
 
   const renderCarouselItem = ({ item }: { item: Media }) => (
-    <TouchableOpacity style={styles.carouselMovieCard} onPress={() => handlePress(item.id, item.media_type)}>
+    <TouchableOpacity
+      style={[styles.carouselMovieCard, styles.glassCard]}
+      onPress={() => (onItemPress ? onItemPress(item) : handlePress(item.id, item.media_type))}
+    >
       <Image
         source={{ uri: `${IMAGE_BASE_URL}${item.poster_path}` }}
         style={styles.carouselMovieImage}
       />
-      <Text style={styles.movieTitle} numberOfLines={1}>
-        {item.title || item.name}
-      </Text>
+      <View style={styles.carouselOverlay} />
+      <TouchableOpacity
+        style={styles.myListButton}
+        onPress={() => toggleMyList(item)}
+      >
+        <Ionicons
+          name={myListIds.includes(item.id) ? 'checkmark' : 'add'}
+          size={18}
+          color="#fff"
+        />
+      </TouchableOpacity>
+      <View style={styles.carouselMeta}>
+        <Text style={styles.movieTitle} numberOfLines={1}>
+          {item.title || item.name}
+        </Text>
+        <View style={styles.pillRow}>
+          <View style={styles.pill}>
+            <Text style={styles.pillText}>HD</Text>
+          </View>
+          <View style={[styles.pill, styles.pillSecondary]}>
+            <Text style={styles.pillText}>⭐ {(item.vote_average || 0).toFixed(1)}</Text>
+          </View>
+        </View>
+      </View>
     </TouchableOpacity>
   );
 
   const renderVerticalItem = (item: Media) => (
-    <TouchableOpacity key={item.id} style={styles.verticalMovieCard} onPress={() => handlePress(item.id, item.media_type)}>
+    <TouchableOpacity
+      key={item.id}
+      style={[styles.verticalMovieCard, styles.glassCard]}
+      onPress={() => (onItemPress ? onItemPress(item) : handlePress(item.id, item.media_type))}
+    >
       <Image
         source={{ uri: `${IMAGE_BASE_URL}${item.poster_path}` }}
         style={styles.verticalMovieImage}
       />
+      <TouchableOpacity
+        style={styles.myListButtonVertical}
+        onPress={() => toggleMyList(item)}
+      >
+        <Ionicons
+          name={myListIds.includes(item.id) ? 'checkmark' : 'add'}
+          size={18}
+          color="#fff"
+        />
+      </TouchableOpacity>
       <View style={styles.verticalMovieInfo}>
         <Text style={styles.verticalMovieTitle}>{item.title || item.name}</Text>
         <Text style={styles.verticalMovieOverview} numberOfLines={3}>
@@ -61,7 +136,14 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true })
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>{title}</Text>
         {carousel && (
-          <TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => {
+              const payload = movies.slice(0, 40);
+              const listParam = encodeURIComponent(JSON.stringify(payload));
+              const titleParam = encodeURIComponent(title);
+              router.push(`/see-all?title=${titleParam}&list=${listParam}`);
+            }}
+          >
             <Text style={styles.seeAllText}>See All</Text>
           </TouchableOpacity>
         )}
@@ -93,47 +175,84 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 15,
+    paddingHorizontal: 16,
     marginBottom: 10,
   },
   sectionTitle: {
     color: 'white',
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    letterSpacing: 0.25,
   },
   seeAllText: {
-    color: '#FF4500',
+    color: '#7dd8ff',
     fontSize: 14,
   },
   movieTitle: {
     color: 'white',
-    marginTop: 8,
     fontSize: 14,
     fontWeight: '600',
   },
   // Carousel-specific styles
   carouselContent: {
-    paddingLeft: 15,
+    paddingLeft: 16,
     paddingVertical: 10,
   },
   carouselMovieCard: {
     marginRight: 15,
     width: 140,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   carouselMovieImage: {
     width: 140,
     height: 210,
+    borderRadius: 16,
+  },
+  carouselOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  carouselMeta: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    right: 8,
+    gap: 6,
+  },
+  pillRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  pill: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  pillSecondary: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  pillText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
   },
   // Vertical list-specific styles
   verticalListContainer: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 16,
   },
   verticalMovieCard: {
     flexDirection: 'row',
     marginBottom: 15,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
+    borderRadius: 16,
     overflow: 'hidden',
   },
   verticalMovieImage: {
@@ -147,12 +266,48 @@ const styles = StyleSheet.create({
   verticalMovieTitle: {
     color: 'white',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '800',
     marginBottom: 5,
+    letterSpacing: 0.1,
   },
   verticalMovieOverview: {
-    color: '#b3b3b3',
+    color: 'rgba(255,255,255,0.78)',
     fontSize: 12,
+  },
+  glassCard: {
+    backgroundColor: 'rgba(255,255,255,0.045)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+  },
+  myListButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
+  myListButtonVertical: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
   },
 });
 

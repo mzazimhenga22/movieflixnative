@@ -15,23 +15,27 @@ import {
   Dimensions,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import ScreenWrapper from '../../components/ScreenWrapper';
 import MovieList from '../../components/MovieList';
 import { API_KEY, API_BASE_URL } from '../../constants/api';
 import { Media } from '../../types';
+import { getAccentFromPosterPath } from '../../constants/theme';
+import { useAccent } from '../components/AccentContext';
 import { IconSymbol } from '../../components/ui/icon-symbol';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const RED_TEXT = '#E50914'; // Cinematic Glass Red
+const RED_TEXT = '#e50914'; // Warm movie accent
 
-const SearchScreen = () => {
+  const SearchScreen = () => {
   const router = useRouter();
 
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Media[]>([]);
   const [loading, setLoading] = useState(false);
-  const [focused, setFocused] = useState(false);
+    const [focused, setFocused] = useState(false);
+    const { setAccentColor } = useAccent();
 
   const scaleAnim = useRef(new Animated.Value(1)).current;
 
@@ -80,10 +84,16 @@ const SearchScreen = () => {
   }, [query]);
 
   const clear = () => setQuery('');
+  const accentColor = getAccentFromPosterPath(results[0]?.poster_path);
 
-  const inputBackground = 'rgba(255, 255, 255, 0.05)';
-  const headerOverlay = 'rgba(0, 0, 0, 0.2)';
-  const borderColor = 'rgba(255, 255, 255, 0.1)';
+    useEffect(() => {
+      if (accentColor) {
+        setAccentColor(accentColor);
+      }
+    }, [accentColor, setAccentColor]);
+
+  const inputBackground = 'transparent';
+  const borderColor = 'rgba(255, 255, 255, 0.12)';
 
   return (
     <ScreenWrapper>
@@ -91,57 +101,86 @@ const SearchScreen = () => {
         behavior={Platform.select({ ios: 'padding', android: undefined })}
         style={styles.flex}
       >
+        <LinearGradient
+          colors={[accentColor, '#150a13', '#05060f']}
+          start={[0, 0]}
+          end={[1, 1]}
+          style={styles.gradient}
+        />
+        <LinearGradient
+          colors={['rgba(125,216,255,0.2)', 'rgba(255,255,255,0)']}
+          start={{ x: 0.1, y: 0 }}
+          end={{ x: 0.9, y: 1 }}
+          style={styles.bgOrbPrimary}
+        />
+        <LinearGradient
+          colors={['rgba(229,9,20,0.18)', 'rgba(255,255,255,0)']}
+          start={{ x: 0.8, y: 0 }}
+          end={{ x: 0.2, y: 1 }}
+          style={styles.bgOrbSecondary}
+        />
         <View style={styles.root}>
-          {/* Full-width blurred header card (edge-to-edge) */}
+          {/* Glassy hero header */}
           <View style={styles.headerWrap}>
-            <BlurView
-              intensity={80}
-              tint="dark"
-              style={[styles.blur, { width: SCREEN_WIDTH }]}
-            >
-              <View style={[styles.headerInner, { backgroundColor: headerOverlay }]}>
+            <LinearGradient
+              colors={['#e50914', '#b20710']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.headerGlow}
+            />
+            <View style={styles.headerCard}>
+              <View style={styles.headerRow}>
                 <TouchableOpacity
                   onPress={() => router.back()}
                   style={styles.iconButton}
                   activeOpacity={0.8}
                   accessibilityRole="button"
                 >
-                  <IconSymbol name="arrow.left" size={20} color={RED_TEXT} />
+                  <IconSymbol name="arrow.left" size={20} color="#fff" />
                 </TouchableOpacity>
-
-                <Animated.View style={[styles.searchWrap, { transform: [{ scale: scaleAnim }] }]}>
-                  <TextInput
-                    placeholder="Search movies, TV shows, actors, genres..."
-                    placeholderTextColor={RED_TEXT + '99'}
-                    value={query}
-                    onChangeText={setQuery}
-                    style={[
-                      styles.input,
-                      {
-                        backgroundColor: inputBackground,
-                        color: RED_TEXT,
-                        borderColor: borderColor,
-                      },
-                    ]}
-                    onFocus={() => setFocused(true)}
-                    onBlur={() => setFocused(false)}
-                    returnKeyType="search"
-                    accessible
-                    accessibilityLabel="Search input"
-                  />
-
-                  {query.length > 0 ? (
-                    <TouchableOpacity onPress={clear} style={styles.clearBtn} accessibilityRole="button">
-                      <IconSymbol name="xmark" size={16} color={RED_TEXT} />
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={styles.micIconPlaceholder}>
-                      <IconSymbol name="magnifyingglass" size={16} color={RED_TEXT + '88'} />
-                    </View>
-                  )}
-                </Animated.View>
+                <View style={styles.titleWrap}>
+                  <Text style={styles.eyebrow}>Find your next watch</Text>
+                  <Text style={styles.title}>Search</Text>
+                </View>
               </View>
-            </BlurView>
+
+              <Animated.View style={[styles.searchWrap, { transform: [{ scale: scaleAnim }] }]}>
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.04)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.searchBg}
+                />
+                <TextInput
+                  placeholder="Search movies, TV shows, actors, genres..."
+                  placeholderTextColor={'#fefefe99'}
+                  value={query}
+                  onChangeText={setQuery}
+                  style={[
+                    styles.input,
+                    {
+                      color: '#fefefe',
+                      borderColor: borderColor,
+                    },
+                  ]}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  returnKeyType="search"
+                  accessible
+                  accessibilityLabel="Search input"
+                />
+
+                {query.length > 0 ? (
+                  <TouchableOpacity onPress={clear} style={styles.clearBtn} accessibilityRole="button">
+                    <IconSymbol name="xmark" size={16} color="#fefefe" />
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.micIconPlaceholder}>
+                    <IconSymbol name="magnifyingglass" size={16} color={'#fefefe88'} />
+                  </View>
+                )}
+              </Animated.View>
+            </View>
           </View>
 
           {/* Content */}
@@ -155,31 +194,23 @@ const SearchScreen = () => {
             ) : query.length > 2 ? (
               <View style={styles.empty}>
                 <IconSymbol name="film" size={42} color={RED_TEXT + '88'} />
-                <Text style={[styles.emptyTitle, { color: RED_TEXT }]}>No results</Text>
-                <Text style={[styles.emptySubtitle, { color: RED_TEXT + '99' }]}>
+                <Text style={[styles.emptyTitle, { color: '#fefefe' }]}>No results</Text>
+                <Text style={[styles.emptySubtitle, { color: '#fefefe99' }]}>
                   Try a different title or remove filters.
                 </Text>
               </View>
             ) : (
               // Centered hint card
               <View style={styles.hintContainer}>
-                <BlurView intensity={50} tint={'dark'} style={styles.hintCardBlur}>
-                  <View
-                    style={[
-                      styles.hintCard,
-                      {
-                        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                        borderColor: borderColor,
-                      },
-                    ]}
-                  >
-                    <IconSymbol name="sparkles" size={36} color={RED_TEXT} />
-                    <Text style={[styles.hintTitle, { color: RED_TEXT }]}>Find your next watch</Text>
-                    <Text style={[styles.hintSubtitle, { color: RED_TEXT + '99' }]}>
+                <View style={styles.hintCardBlur}>
+                  <View style={styles.hintCard}>
+                    <IconSymbol name="wand.and.stars" size={36} color={'#fefefe'} />
+                    <Text style={styles.hintTitle}>Find your next watch</Text>
+                    <Text style={styles.hintSubtitle}>
                       Type at least 3 characters to search movies, actors, and genres.
                     </Text>
                   </View>
-                </BlurView>
+                </View>
               </View>
             )}
           </View>
@@ -190,40 +221,100 @@ const SearchScreen = () => {
 };
 
 const styles = StyleSheet.create({
-    flex: { flex: 1 },
+  gradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  bgOrbPrimary: {
+    position: 'absolute',
+    width: 360,
+    height: 360,
+    borderRadius: 180,
+    top: -80,
+    left: -40,
+    opacity: 0.6,
+    transform: [{ rotate: '16deg' }],
+  },
+  bgOrbSecondary: {
+    position: 'absolute',
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    bottom: -90,
+    right: -20,
+    opacity: 0.55,
+    transform: [{ rotate: '-12deg' }],
+  },
+  flex: { flex: 1 },
   root: {
     flex: 1,
     paddingTop: 18,
+    paddingHorizontal: 0,
   },
   headerWrap: {
     marginBottom: 12,
-    alignItems: 'center',
+    paddingHorizontal: 12,
   },
-  blur: {
-    alignSelf: 'center',
-    borderRadius: 0,
-    overflow: 'hidden',
+  headerGlow: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.8,
+    borderRadius: 18,
   },
-  headerInner: {
+  headerCard: {
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    gap: 12,
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    gap: 12,
   },
   iconButton: {
     width: 42,
     height: 42,
-    borderRadius: 10,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    backgroundColor: '#e50914',
+    shadowColor: '#e50914',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  titleWrap: {
+    flex: 1,
+  },
+  eyebrow: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    letterSpacing: 0.5,
+  },
+  title: {
+    color: '#fefefe',
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   searchWrap: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
+    borderRadius: 14,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  searchBg: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 14,
   },
   input: {
     flex: 1,
@@ -231,7 +322,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     fontSize: 16,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
+    backgroundColor: 'transparent',
   },
   clearBtn: {
     position: 'absolute',
@@ -241,6 +333,7 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   micIconPlaceholder: {
     position: 'absolute',
@@ -252,7 +345,8 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
-    marginTop: 6,
+    marginTop: 8,
+    paddingHorizontal: 16,
   },
   loadingWrap: {
     flex: 1,
@@ -280,7 +374,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   hintCardBlur: {
-    borderRadius: 14,
+    borderRadius: 16,
     overflow: 'hidden',
     minWidth: 260,
     maxWidth: 360,
@@ -288,20 +382,28 @@ const styles = StyleSheet.create({
   hintCard: {
     paddingVertical: 22,
     paddingHorizontal: 20,
-    borderRadius: 14,
+    borderRadius: 16,
     alignItems: 'center',
     borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.14)',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
   },
   hintTitle: {
     marginTop: 8,
     fontSize: 18,
     fontWeight: '700',
+    color: '#fefefe',
   },
   hintSubtitle: {
     marginTop: 6,
     fontSize: 13,
     textAlign: 'center',
     maxWidth: 320,
+    color: '#fefefe99',
   },
 });
 

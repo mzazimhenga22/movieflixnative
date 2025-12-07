@@ -6,10 +6,8 @@ import Video from 'react-native-video';
 // Polyfills: import these near your app entry (index.js / App.tsx) BEFORE using p-stream
 // 1) base64 polyfill
 import '@react-native-anywhere/polyfill-base64';
-// 2) crypto polyfill — follow react-native-quick-crypto setup; simple import is often enough
-import 'react-native-quick-crypto';
 
-import { usePStream } from './pstream/usePStream';
+import { usePStream } from './usePStream';
 
 export default function App() {
   const { loading, error, result, scrape } = usePStream();
@@ -26,12 +24,16 @@ export default function App() {
   };
 
   // choose playable uri and headers from result
-  const stream = result?.stream;
-  const firstStream = Array.isArray(stream) ? stream[0] : stream; // runAll returns stream object, details vary
+  const streamLike: any = (result as any)?.stream ?? result; // stub returns string; real provider returns object
+  const firstStream = Array.isArray(streamLike) ? streamLike[0] : streamLike;
 
   // helper to pick a playable uri for file/hls
   const pickUriAndHeaders = (s: any) => {
     if (!s) return null;
+
+    if (typeof s === 'string') {
+      return { uri: s };
+    }
 
     if (s.type === 'hls') {
       // playlist will be an m3u8 (maybe proxied). headers may be present

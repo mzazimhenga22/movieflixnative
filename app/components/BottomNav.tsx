@@ -10,6 +10,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useAccent } from './AccentContext';
 
 type Props = BottomTabBarProps & {
   insetsBottom: number;
@@ -18,6 +20,7 @@ type Props = BottomTabBarProps & {
 
 export default function BottomNav({ insetsBottom, isDark, state, navigation }: Props): React.ReactElement {
   const bottomOffset = Platform.OS === 'ios' ? (insetsBottom || 12) : (insetsBottom ? insetsBottom + 6 : 10);
+  const { accentColor } = useAccent();
 
   const iconForRoute = (routeName: string, focused: boolean) => {
     switch (routeName) {
@@ -29,6 +32,8 @@ export default function BottomNav({ insetsBottom, isDark, state, navigation }: P
         return focused ? 'search' : 'search-outline';
       case 'downloads':
         return focused ? 'download' : 'download-outline';
+      case 'interactive':
+        return focused ? 'sparkles' : 'sparkles-outline';
       default:
         return focused ? 'ellipse' : 'ellipse-outline';
     }
@@ -51,12 +56,18 @@ export default function BottomNav({ insetsBottom, isDark, state, navigation }: P
 
   return (
     <View pointerEvents="box-none" style={[styles.outer, { bottom: bottomOffset }]}>
-      <BlurView intensity={80} tint={isDark ? 'dark' : 'light'} style={styles.blurWrap}>
+      <BlurView intensity={95} tint="dark" style={[styles.blurWrap, { borderColor: `${accentColor}55` }]}>
         <View
           style={[
             styles.overlay,
-            { backgroundColor: isDark ? 'rgba(120,20,20,0.18)' : 'rgba(255,80,80,0.12)' },
+            { backgroundColor: 'rgba(15,15,25,0.55)' },
           ]}
+        />
+        <LinearGradient
+          colors={[`${accentColor}33`, 'rgba(255,255,255,0.02)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.glassSheen}
         />
         <View style={styles.inner}>
           {state.routes.map((route, idx) => {
@@ -95,9 +106,18 @@ export default function BottomNav({ insetsBottom, isDark, state, navigation }: P
                 accessibilityRole="button"
                 accessibilityState={{ selected: focused }}
               >
-                <Ionicons name={iconName as any} size={22} color={focused ? '#ffd600' : '#fff'} />
-                <Text style={[styles.text, focused ? styles.activeText : undefined]}>{label}</Text>
-                {focused && <View style={styles.activeDot} />}
+                <View style={[styles.itemInner, focused && styles.itemInnerActive]}>
+                  {focused && (
+                    <LinearGradient
+                      colors={['#e50914', '#b20710']}
+                      start={{ x: 0.05, y: 0 }}
+                      end={{ x: 0.95, y: 1 }}
+                      style={styles.activePill}
+                    />
+                  )}
+                  <Ionicons name={iconName as any} size={22} color={focused ? '#ffffff' : '#f5f5f5'} />
+                  <Text style={[styles.text, focused ? styles.activeText : undefined]}>{label}</Text>
+                </View>
               </TouchableOpacity>
             );
           })}
@@ -119,48 +139,67 @@ const styles = StyleSheet.create({
     width: '92%',
     borderRadius: 22,
     overflow: 'hidden',
-    shadowColor: '#ff4b4b',
-    shadowOffset: { width: 0, height: -8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#0b1736',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
     elevation: 10,
     minHeight: 72,
   },
   overlay: {
     ...StyleSheet.absoluteFillObject,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.04)',
+    borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  glassSheen: {
+    ...StyleSheet.absoluteFillObject,
   },
   inner: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 6,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
     minHeight: 72,
   },
   item: {
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
     minWidth: 56,
   },
+  itemInner: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    minWidth: 72,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    gap: 2,
+  },
+  itemInnerActive: {
+    shadowColor: '#9fd7ff',
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
   text: {
-    color: '#fff',
+    color: '#f5f5f5',
     fontSize: 11,
-    marginTop: 4,
+    marginTop: 2,
   },
   activeText: {
-    color: '#ffd600',
+    color: '#ffffff',
     fontWeight: '700',
     fontSize: 11,
   },
-  activeDot: {
-    marginTop: 6,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#ffd600',
-    alignSelf: 'center',
+  activePill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 16,
+    opacity: 0.98,
   },
 });

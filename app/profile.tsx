@@ -12,16 +12,18 @@ import {
   Alert,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import ScreenWrapper from '../components/ScreenWrapper';
-import BottomNav from './components/social-feed/BottomNav';
 import { authPromise, firestore } from '../constants/firebase';
 import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
+import { getAccentFromPosterPath } from '../constants/theme';
 
 const ProfileScreen: React.FC = () => {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { from, userId: profileUserId } = params as { from?: string; userId?: string };
+  const cameFromSocial = from === 'social-feed';
 
   const [authReady, setAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<any | null>(null);
@@ -30,6 +32,7 @@ const ProfileScreen: React.FC = () => {
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [followBusy, setFollowBusy] = useState(false);
 
   // Determine which user to display: explicit param overrides current user
   const userIdToDisplay = profileUserId || currentUser?.uid;
@@ -128,12 +131,14 @@ const ProfileScreen: React.FC = () => {
   }, [userIdToDisplay, currentUser, isOwnProfile]);
 
   const handleFollow = async () => {
+    if (followBusy) return;
     if (!authReady || !currentUser) {
       Alert.alert('Please sign in to follow users.');
       return;
     }
     if (!userIdToDisplay || isOwnProfile) return;
 
+    setFollowBusy(true);
     // optimistic update
     setIsFollowing(true);
     setFollowersCount((c) => c + 1);
@@ -155,16 +160,20 @@ const ProfileScreen: React.FC = () => {
       setIsFollowing(false);
       setFollowersCount((c) => Math.max(0, c - 1));
       Alert.alert('Error', 'Unable to follow user. Please try again.');
+    } finally {
+      setFollowBusy(false);
     }
   };
 
   const handleUnfollow = async () => {
+    if (followBusy) return;
     if (!authReady || !currentUser) {
       Alert.alert('Please sign in to unfollow users.');
       return;
     }
     if (!userIdToDisplay || isOwnProfile) return;
 
+    setFollowBusy(true);
     // optimistic update
     setIsFollowing(false);
     setFollowersCount((c) => Math.max(0, c - 1));
@@ -186,11 +195,13 @@ const ProfileScreen: React.FC = () => {
       setIsFollowing(true);
       setFollowersCount((c) => c + 1);
       Alert.alert('Error', 'Unable to unfollow user. Please try again.');
+    } finally {
+      setFollowBusy(false);
     }
   };
 
   const handleBack = () => {
-    if (from === 'social-feed') {
+    if (cameFromSocial) {
       router.replace('/social-feed');
     } else {
       router.replace('/movies');
@@ -223,11 +234,20 @@ const ProfileScreen: React.FC = () => {
   };
 
   const favoriteGenres = userProfile?.favoriteGenres || [];
+  const accentColor = getAccentFromPosterPath(
+    userProfile?.favoriteColor || (favoriteGenres[0] as string | undefined)
+  );
 
   return (
-    <View style={styles.rootContainer}>
+    <View style={[styles.rootContainer, cameFromSocial && { backgroundColor: '#05060f' }]}>
       <ScreenWrapper>
         <StatusBar style="light" translucent={false} />
+        <LinearGradient
+          colors={[accentColor, '#05060f']}
+          start={[0, 0]}
+          end={[1, 1]}
+          style={StyleSheet.absoluteFillObject}
+        />
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
@@ -240,6 +260,12 @@ const ProfileScreen: React.FC = () => {
         <ScrollView contentContainerStyle={styles.container}>
           <View style={styles.inner}>
             <View style={styles.profileHeader}>
+              <LinearGradient
+                colors={['rgba(229,9,20,0.2)', 'rgba(255,255,255,0.05)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.headerSheen}
+              />
               <Image
                 source={{
                   uri:
@@ -257,8 +283,12 @@ const ProfileScreen: React.FC = () => {
                 </TouchableOpacity>
               ) : (
                 <TouchableOpacity
-                  style={isFollowing ? styles.unfollowButton : styles.followButton}
+                  style={[
+                    isFollowing ? styles.unfollowButton : styles.followButton,
+                    followBusy && { opacity: 0.6 },
+                  ]}
                   onPress={isFollowing ? handleUnfollow : handleFollow}
+                  disabled={followBusy}
                 >
                   <Text style={styles.followButtonText}>{isFollowing ? 'Following' : 'Follow'}</Text>
                 </TouchableOpacity>
@@ -280,7 +310,7 @@ const ProfileScreen: React.FC = () => {
               </View>
             </View>
 
-            <View style={styles.favoriteGenresContainer}>
+            <View style={styles.glassCard}>
               <Text style={styles.sectionTitle}>Favorite Genres</Text>
               <View style={styles.genresList}>
                 {favoriteGenres.map((genre: string) => (
@@ -291,7 +321,8 @@ const ProfileScreen: React.FC = () => {
               </View>
             </View>
 
-            <View style={styles.actionsContainer}>
+            <View style={[styles.glassCard, { paddingVertical: 12 }]}>
+              <Text style={styles.sectionTitle}>Actions</Text>
               <TouchableOpacity style={styles.actionItem} onPress={handleSettings}>
                 <Ionicons name="settings-outline" size={24} color="white" />
                 <Text style={styles.actionText}>Settings</Text>
@@ -304,15 +335,14 @@ const ProfileScreen: React.FC = () => {
 
               {isOwnProfile && (
                 <TouchableOpacity style={styles.actionItem} onPress={handleLogout}>
-                  <Ionicons name="log-out-outline" size={24} color="red" />
-                  <Text style={[styles.actionText, { color: 'red' }]}>Logout</Text>
+                  <Ionicons name="log-out-outline" size={24} color="#e50914" />
+                  <Text style={[styles.actionText, { color: '#e50914' }]}>Logout</Text>
                 </TouchableOpacity>
               )}
             </View>
           </View>
         </ScrollView>
       </ScreenWrapper>
-      <BottomNav />
     </View>
   );
 };
@@ -320,7 +350,7 @@ const ProfileScreen: React.FC = () => {
 const styles = StyleSheet.create({
   rootContainer: {
     flex: 1,
-    backgroundColor: '#630303ff',
+    backgroundColor: '#05060f',
   },
   container: {
     flexGrow: 1,
@@ -351,14 +381,24 @@ const styles = StyleSheet.create({
   },
   profileHeader: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 24,
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+  },
+  headerSheen: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.6,
   },
   avatar: {
     width: 120,
     height: 120,
     borderRadius: 60,
     borderWidth: 3,
-    borderColor: '#FF4500',
+    borderColor: '#e50914',
     marginBottom: 15,
   },
   name: {
@@ -373,28 +413,32 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   editProfileButton: {
-    backgroundColor: '#FF4500',
-    paddingVertical: 8,
-    paddingHorizontal: 20,
-    borderRadius: 20,
+    backgroundColor: '#e50914',
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   editProfileButtonText: {
     color: 'white',
     fontWeight: 'bold',
   },
   followButton: {
-    backgroundColor: '#FF4500',
-    paddingVertical: 8,
+    backgroundColor: '#e50914',
+    paddingVertical: 10,
     paddingHorizontal: 30,
-    borderRadius: 20,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   unfollowButton: {
-    backgroundColor: 'transparent',
-    paddingVertical: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 10,
     paddingHorizontal: 30,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#FF4500',
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   followButtonText: {
     color: 'white',
@@ -403,10 +447,12 @@ const styles = StyleSheet.create({
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    backgroundColor: 'rgba(30, 30, 30, 0.8)',
-    padding: 15,
-    borderRadius: 15,
-    marginBottom: 30,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   statBox: {
     alignItems: 'center',
@@ -424,6 +470,18 @@ const styles = StyleSheet.create({
   favoriteGenresContainer: {
     marginBottom: 30,
   },
+  glassCard: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -435,7 +493,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   genreTag: {
-    backgroundColor: '#333',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 15,
@@ -446,13 +504,12 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
   },
-  actionsContainer: {},
   actionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 15,
+    paddingVertical: 14,
     borderTopWidth: 1,
-    borderTopColor: '#333',
+    borderTopColor: 'rgba(255,255,255,0.06)',
   },
   actionText: {
     color: 'white',

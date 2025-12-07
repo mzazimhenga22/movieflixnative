@@ -14,7 +14,8 @@ import MovieList from '../../components/MovieList';
 import { API_KEY, API_BASE_URL } from '../../constants/api';
 import { Genre, Media } from '../../types';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import { getAccentFromPosterPath } from '../../constants/theme';
+import { useAccent } from '../components/AccentContext';
 
 const mainCategories = [
   {
@@ -36,29 +37,30 @@ const mainCategories = [
 
 const GlassSkeleton = () => (
   <View style={styles.skeletonWrap}>
-    <BlurView intensity={50} tint="dark" style={[styles.glassCard, styles.skelHeader]}>
+    <View style={[styles.glassCard, styles.skelHeader]}>
       <View style={styles.skelTitle} />
-    </BlurView>
+    </View>
 
-    <BlurView intensity={45} tint="dark" style={[styles.glassCard, styles.skelCategories]}>
+    <View style={[styles.glassCard, styles.skelCategories]}>
       <View style={styles.skelRow} />
       <View style={[styles.skelRow, { width: '70%', marginTop: 12 }]} />
-    </BlurView>
+    </View>
 
-    <BlurView intensity={40} tint="dark" style={[styles.glassCard, styles.skelList]}>
+    <View style={[styles.glassCard, styles.skelList]}>
       <View style={styles.skelLine} />
       <View style={styles.skelLine} />
       <View style={styles.skelLineShort} />
-    </BlurView>
+    </View>
   </View>
 );
 
-const CategoriesScreen: React.FC = () => {
+  const CategoriesScreen: React.FC = () => {
   const [genres, setGenres] = useState<Genre[]>([]);
   const [genresLoading, setGenresLoading] = useState<boolean>(true);
   const [selectedGenre, setSelectedGenre] = useState<number | null>(null);
   const [moviesByGenre, setMoviesByGenre] = useState<Media[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const { setAccentColor } = useAccent();
 
   useEffect(() => {
     const fetchGenres = async () => {
@@ -110,19 +112,71 @@ const CategoriesScreen: React.FC = () => {
     // Add navigation or filtering logic here if desired
   };
 
+  const selectedGenreName = selectedGenre
+    ? genres.find((g) => g.id === selectedGenre)?.name ?? 'Genre'
+    : null;
+
+  const accentColor = getAccentFromPosterPath(
+      moviesByGenre[0]?.poster_path || mainCategories[0]?.image || undefined
+    );
+
+    useEffect(() => {
+      if (accentColor) {
+        setAccentColor(accentColor);
+      }
+    }, [accentColor, setAccentColor]);
+
   return (
     <ScreenWrapper>
       <LinearGradient
-        colors={['#2b0000', '#120206', '#06060a']}
+        colors={[accentColor, '#150a13', '#05060f']}
         start={[0, 0]}
         end={[1, 1]}
         style={styles.gradient}
       >
+        {/* liquid background orbs for glassy depth */}
+        <LinearGradient
+          colors={['rgba(125,216,255,0.2)', 'rgba(255,255,255,0)']}
+          start={{ x: 0.1, y: 0 }}
+          end={{ x: 0.9, y: 1 }}
+          style={styles.bgOrbPrimary}
+        />
+        <LinearGradient
+          colors={['rgba(113,0,255,0.18)', 'rgba(255,255,255,0)']}
+          start={{ x: 0.8, y: 0 }}
+          end={{ x: 0.2, y: 1 }}
+          style={styles.bgOrbSecondary}
+        />
         <ScrollView contentContainerStyle={styles.container}>
-          {/* Header / Title (glass) */}
-          <BlurView intensity={60} tint="dark" style={styles.headerGlass}>
-            <Text style={styles.headerText}>Categories</Text>
-          </BlurView>
+          {/* Header / Title (glassy hero) */}
+          <View style={styles.headerWrap}>
+            <LinearGradient
+              colors={['#e50914', '#b20710']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.headerGlow}
+            />
+            <View style={styles.headerGlass}>
+              <View style={styles.headerTitleRow}>
+                <View style={styles.headerAccent} />
+                <View>
+                  <Text style={styles.headerEyebrow}>Browse by vibe</Text>
+                  <Text style={styles.headerText}>Categories</Text>
+                </View>
+              </View>
+              <View style={styles.headerMetaRow}>
+                <View style={styles.metaPill}>
+                  <Text style={styles.metaText}>Genres</Text>
+                </View>
+                <View style={[styles.metaPill, styles.metaPillAlt]}>
+                  <Text style={styles.metaText}>New & Trending</Text>
+                </View>
+                <View style={[styles.metaPill, styles.metaPillGhost]}>
+                  <Text style={styles.metaText}>Curated</Text>
+                </View>
+              </View>
+            </View>
+          </View>
 
           {/* If genres are loading show skeleton that matches home screen */}
           {genresLoading ? (
@@ -130,7 +184,11 @@ const CategoriesScreen: React.FC = () => {
           ) : (
             <>
               {/* Main Categories — glass card */}
-              <BlurView intensity={48} tint="dark" style={styles.sectionGlass}>
+              <View style={styles.sectionGlass}>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.sectionTitle}>Spotlight</Text>
+                  <Text style={styles.sectionSubtitle}>Pick a vibe</Text>
+                </View>
                 <View style={styles.mainCategoriesSection}>
                   {mainCategories.map((category) => (
                     <CategoryCard
@@ -141,16 +199,20 @@ const CategoriesScreen: React.FC = () => {
                     />
                   ))}
                 </View>
-              </BlurView>
+              </View>
 
               {/* Genre selector */}
-              <BlurView intensity={44} tint="dark" style={[styles.sectionGlass, styles.genreGlass]}>
+              <View style={[styles.sectionGlass, styles.genreGlass]}>
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.sectionTitle}>Genres</Text>
+                  <Text style={styles.sectionSubtitle}>Tap to filter</Text>
+                </View>
                 <GenreSelector
                   genres={genres}
                   selectedGenre={selectedGenre}
                   onSelectGenre={handleSelectGenre}
                 />
-              </BlurView>
+              </View>
 
               {/* Results / loader */}
               {isLoading ? (
@@ -158,9 +220,17 @@ const CategoriesScreen: React.FC = () => {
                   <ActivityIndicator size="large" color="#E50914" />
                 </View>
               ) : selectedGenre !== null ? (
-                <BlurView intensity={36} tint="dark" style={[styles.sectionGlass, styles.resultsGlass]}>
+                <View style={[styles.sectionGlass, styles.resultsGlass]}>
+                  <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionTitle}>Results</Text>
+                    {selectedGenreName ? (
+                      <View style={styles.chip}>
+                        <Text style={styles.chipText}>{selectedGenreName}</Text>
+                      </View>
+                    ) : null}
+                  </View>
                   <MovieList title="Results" movies={moviesByGenre} carousel={true} />
-                </BlurView>
+                </View>
               ) : null}
             </>
           )}
@@ -177,50 +247,146 @@ const styles = StyleSheet.create({
   gradient: {
     flex: 1,
   },
+  bgOrbPrimary: {
+    position: 'absolute',
+    width: 360,
+    height: 360,
+    borderRadius: 180,
+    top: -60,
+    left: -50,
+    opacity: 0.65,
+    transform: [{ rotate: '14deg' }],
+  },
+  bgOrbSecondary: {
+    position: 'absolute',
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    bottom: -80,
+    right: -20,
+    opacity: 0.55,
+    transform: [{ rotate: '-10deg' }],
+  },
   container: {
-    paddingHorizontal: 14,
-    paddingTop: Platform.OS === 'ios' ? 48 : 18,
-    paddingBottom: 40,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 44 : 18,
+    paddingBottom: 48,
   },
 
   // Header
+  headerWrap: {
+    marginBottom: 14,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  headerGlow: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.75,
+  },
   headerGlass: {
-    marginBottom: 12,
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    alignItems: 'center',
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderColor: 'rgba(255,255,255,0.12)',
     shadowColor: '#000',
-    shadowOpacity: 0.32,
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerAccent: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#e50914',
+    shadowColor: '#e50914',
+    shadowOpacity: 0.6,
     shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 6,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  headerEyebrow: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    letterSpacing: 0.5,
   },
   headerText: {
-    color: '#FFFFFF',
-    fontSize: 26,
+    color: '#fefefe',
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+  },
+  headerMetaRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  metaPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  metaPillAlt: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  metaPillGhost: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  metaText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '700',
-    textShadowColor: 'rgba(0,0,0,0.45)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  sectionTitle: {
+    color: '#fefefe',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  sectionSubtitle: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
   },
 
   // Section glass card
   sectionGlass: {
-    borderRadius: 14,
-    marginBottom: 14,
-    padding: 10,
+    borderRadius: 16,
+    marginBottom: 16,
+    padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.045)',
     shadowColor: '#000',
-    shadowOpacity: 0.24,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 4,
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  chipText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 
   // main categories

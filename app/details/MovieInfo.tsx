@@ -23,6 +23,22 @@ const MovieInfo: React.FC<Props> = ({ movie, isLoading }) => {
         <Text style={styles.releaseDate}>Release Date: {movie?.release_date || movie?.first_air_date || 'N/A'}</Text>
       )}
 
+      {!isLoading && movie && (
+        <View style={styles.metaRow}>
+          {typeof movie.vote_average === 'number' && (
+            <View style={styles.metaPill}>
+              <Text style={styles.metaPillLabel}>Score</Text>
+              <Text style={styles.metaPillValue}>{movie.vote_average.toFixed(1)}</Text>
+            </View>
+          )}
+          {movie.media_type && (
+            <View style={styles.metaPillSoft}>
+              <Text style={styles.metaPillValue}>{movie.media_type === 'tv' ? 'Series' : 'Movie'}</Text>
+            </View>
+          )}
+        </View>
+      )}
+
       {isLoading ? (
         <>
           <PulsePlaceholder style={styles.overviewPlaceholderLine} />
@@ -75,6 +91,42 @@ const styles = StyleSheet.create({
     height: 14,
     borderRadius: 6,
     marginBottom: 8,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  metaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  metaPillSoft: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  metaPillLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  metaPillValue: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });
 

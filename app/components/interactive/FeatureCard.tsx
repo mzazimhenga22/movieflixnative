@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface FeatureCardProps {
   iconName: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -18,11 +18,16 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ iconName, title, description,
       onPress={onPress}
       activeOpacity={0.8}
     >
-      <BlurView intensity={80} tint="dark" style={styles.blurView} />
+      <LinearGradient
+        colors={['rgba(229,9,20,0.16)', 'rgba(255,255,255,0.04)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.cardBg}
+      />
       {isLarge ? (
         <>
           <View style={[styles.iconContainer, styles.largeIconContainer]}>
-            <MaterialCommunityIcons name={iconName} size={40} color="#FF4500" />
+            <MaterialCommunityIcons name={iconName} size={40} color="#ffffff" />
           </View>
           <View style={styles.textContainer}>
             <Text style={[styles.title, styles.largeTitle]}>{title}</Text>
@@ -32,7 +37,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ iconName, title, description,
       ) : (
         <>
           <View style={styles.iconContainer}>
-            <MaterialCommunityIcons name={iconName} size={30} color="#FF4500" />
+            <MaterialCommunityIcons name={iconName} size={30} color="#ffffff" />
           </View>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.description}>{description}</Text>
@@ -44,7 +49,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ iconName, title, description,
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 15,
+    borderRadius: 16,
     padding: 15,
     marginBottom: 15,
     flex: 1,
@@ -52,9 +57,17 @@ const styles = StyleSheet.create({
     minHeight: 160,
     justifyContent: 'flex-start',
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
   },
-  blurView: {
+  cardBg: {
     ...StyleSheet.absoluteFillObject,
+    opacity: 0.9,
   },
   largeCard: {
     flex: undefined,
@@ -67,6 +80,11 @@ const styles = StyleSheet.create({
   iconContainer: {
     marginBottom: 10,
     alignSelf: 'flex-start',
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   largeIconContainer: {
     marginBottom: 0,
@@ -78,15 +96,16 @@ const styles = StyleSheet.create({
   title: {
     color: 'white',
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '800',
     marginBottom: 5,
+    letterSpacing: 0.2,
   },
   largeTitle: {
     fontSize: 20,
     marginBottom: 8,
   },
   description: {
-    color: '#BBBBBB',
+    color: 'rgba(255,255,255,0.78)',
     fontSize: 12,
     lineHeight: 18,
   },

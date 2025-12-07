@@ -176,7 +176,7 @@ const styles = StyleSheet.create<Style>({
     letterSpacing: 0.1,
   },
   tabTextActive: {
-    color: '#ff6b6b', // warm accent color
+    color: '#7dd8ff', // warm accent color
     fontSize: 14,
     fontWeight: '700',
   },
@@ -186,12 +186,12 @@ const styles = StyleSheet.create<Style>({
     height: 8,
     borderRadius: 999,
     // glassy base: translucent bright pill
-    backgroundColor: 'rgba(255,107,107,0.12)',
+    backgroundColor: 'rgba(125,216,255,0.12)',
     alignSelf: 'center',
     // subtle outer glow
     ...Platform.select({
       ios: {
-        shadowColor: 'rgba(255,107,107,0.12)',
+        shadowColor: 'rgba(125,216,255,0.12)',
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 1,
         shadowRadius: 12,

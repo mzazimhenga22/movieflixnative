@@ -21,8 +21,8 @@ const SongList: React.FC<SongListProps> = ({ title, songs }) => {
 
   const handleScroll = (event: any) => {
     const scrollPosition = event.nativeEvent.contentOffset.x;
-    // Subtract the horizontal padding from the width to get the correct card width
-    const cardWidth = width - 30; 
+    // Match the visible width (screen width minus horizontal padding in the parent)
+    const cardWidth = width - 32;
     const index = Math.round(scrollPosition / cardWidth);
     setActiveIndex(index);
   };
@@ -46,33 +46,62 @@ const SongList: React.FC<SongListProps> = ({ title, songs }) => {
       <Text style={styles.sectionTitle}>{title}</Text>
       <ScrollView
         horizontal
-        pagingEnabled
         showsHorizontalScrollIndicator={false}
         onScroll={handleScroll}
         scrollEventThrottle={16}
+        snapToInterval={width - 32}
+        decelerationRate="fast"
+        snapToAlignment="start"
         contentContainerStyle={styles.sliderContainer}
       >
         {topSongs.map((song) => (
-          <TouchableOpacity key={song.id} style={styles.card} onPress={() => handleCardPress(song.id)}>
-            <ImageBackground
-              source={{ uri: `${IMAGE_BASE_URL}${song.poster_path}` }}
-              style={styles.imageBackground}
-              resizeMode="cover"
-            >
-              <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.8)']}
-                style={styles.gradient}
-              >
-                <View style={styles.cardContent}>
-                  <Text style={styles.songTitle}>{song.title || song.name}</Text>
-                  <Text style={styles.movieSubTitle}>From the movie</Text>
-                  <TouchableOpacity style={styles.watchButton} onPress={() => handleWatchPress(song)}>
-                    <FontAwesome name="youtube-play" size={20} color="white" />
-                    <Text style={styles.watchButtonText}>Watch Now</Text>
-                  </TouchableOpacity>
+          <TouchableOpacity key={song.id} style={[styles.card, styles.glassCard]} onPress={() => handleCardPress(song.id)}>
+            <View style={styles.cardTopRow}>
+              <View style={styles.thumbWrap}>
+                <ImageBackground
+                  source={{ uri: `${IMAGE_BASE_URL}${song.poster_path}` }}
+                  style={styles.thumb}
+                  resizeMode="cover"
+                >
+                  <LinearGradient
+                    colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.55)']}
+                    style={StyleSheet.absoluteFill}
+                  />
+                </ImageBackground>
+                <View style={styles.playPill}>
+                  <FontAwesome name="youtube-play" size={14} color="#fff" />
+                  <Text style={styles.pillText}>Official</Text>
                 </View>
-              </LinearGradient>
-            </ImageBackground>
+              </View>
+
+              <View style={styles.meta}>
+                <Text style={styles.songTitle} numberOfLines={1}>{song.title || song.name}</Text>
+                <Text style={styles.movieSubTitle}>Soundtrack highlight</Text>
+                <View style={styles.badgesRow}>
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>HD</Text>
+                  </View>
+                  <View style={[styles.badge, styles.badgeSecondary]}>
+                    <Text style={styles.badgeText}>Dolby</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            <LinearGradient
+              colors={['rgba(229,9,20,0.18)', 'rgba(10,12,24,0.22)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.bottomStrip}
+            >
+              <TouchableOpacity style={styles.watchButton} onPress={() => handleWatchPress(song)}>
+                <FontAwesome name="youtube-play" size={18} color="white" />
+                <Text style={styles.watchButtonText}>Watch Now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addButton} onPress={() => handleCardPress(song.id)}>
+                <FontAwesome name="plus" size={16} color="#fff" />
+              </TouchableOpacity>
+            </LinearGradient>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -98,56 +127,142 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: 'white',
     fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 15,
-    paddingHorizontal: 15,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    marginBottom: 12,
+    paddingHorizontal: 16,
   },
   sliderContainer: {
-    paddingHorizontal: 15,
+    paddingHorizontal: 0,
   },
   card: {
-    width: width - 60,
-    height: 180,
-    marginHorizontal: 15,
+    // Slightly narrower than the viewport footprint to create spacing between cards
+    width: width - 48,
+    height: 190,
+    marginHorizontal: 8,
   },
-  imageBackground: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 15,
+  glassCard: {
+    borderRadius: 18,
     overflow: 'hidden',
-    justifyContent: 'flex-end',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.1,
+    shadowRadius: 24,
   },
-  gradient: {
+  cardTopRow: {
+    flexDirection: 'row',
+    padding: 14,
+    gap: 12,
+    alignItems: 'center',
+  },
+  thumbWrap: {
+    width: 72,
+    height: 72,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+  },
+  thumb: {
     width: '100%',
     height: '100%',
-    justifyContent: 'flex-end',
-    padding: 15,
   },
-  cardContent: {
-    alignItems: 'flex-start',
+  playPill: {
+    position: 'absolute',
+    bottom: 6,
+    left: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  pillText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  meta: {
+    flex: 1,
+    gap: 6,
   },
   songTitle: {
     color: 'white',
-    fontSize: 22,
-    fontWeight: 'bold',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.15,
   },
   movieSubTitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 14,
-    marginBottom: 10,
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 13,
+  },
+  badgesRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  badgeSecondary: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  bottomStrip: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   watchButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 0, 0, 0.7)',
+    backgroundColor: '#e50914',
     paddingVertical: 8,
     paddingHorizontal: 15,
-    borderRadius: 20,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    shadowColor: 'rgba(229,9,20,0.35)',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
   },
   watchButtonText: {
     color: 'white',
     marginLeft: 8,
     fontWeight: 'bold',
+    fontSize: 14,
+  },
+  addButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   pagination: {
     flexDirection: 'row',

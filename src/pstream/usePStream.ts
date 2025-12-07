@@ -1,31 +1,10 @@
 import { useState, useCallback } from 'react';
 import { Alert } from 'react-native';
-import { makeProviders, makeStandardFetcher, targets, NotFoundError } from '@p-stream/providers';
 
-// Polyfill base64 + crypto polyfill instructions
-import '@react-native-anywhere/polyfill-base64';
-// IMPORTANT: follow react-native-quick-crypto docs to initialize crypto. Example (uncomment if you installed it):
-// const rnCrypto = require('react-native-quick-crypto');
-// // set global crypto for libs that expect it
-// if (!globalThis.crypto) globalThis.crypto = rnCrypto;
+// Temporary Expo Go-friendly stub.
+// Native p-stream providers rely on custom native modules that Expo Go does not ship with.
+// We simply return a sample video URL so the rest of the UI keeps working.
 
-// ---------- Providers singleton ----------
-let providersInstance: ReturnType<typeof makeProviders> | null = null;
-function getProviders() {
-  if (providersInstance) return providersInstance;
-
-  providersInstance = makeProviders({
-    fetcher: makeStandardFetcher(fetch),
-    // proxiedFetcher: undefined, // not needed for native target
-    target: targets.NATIVE,
-    // If your app will request streams from the same IP as playback device, set true
-    consistentIpForRequests: true,
-  });
-
-  return providersInstance;
-}
-
-// ---------- Types ----------
 type ScrapeMedia = {
   type: 'movie' | 'show';
   title?: string;
@@ -40,40 +19,18 @@ export function usePStream() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
 
-  const scrape = useCallback(async (media: ScrapeMedia) => {
-    const providers = getProviders();
-
+  const scrape = useCallback(async (_media: ScrapeMedia) => {
     setLoading(true);
     setError(null);
     setResult(null);
-
     try {
-      const scrapeResult = await providers.runAll({ media });
-      if (!scrapeResult) {
-        Alert.alert('Not found', 'No stream could be found for this media');
-        setResult(null);
-      } else {
-        // If the runAll returned a stream object, use it; else log embeds
-        if (scrapeResult.stream) {
-          // scrapeResult.stream is a Stream object — may be hls or file
-          // For HLS: use stream.playlist
-          if (scrapeResult.stream.type === 'hls') {
-            setResult(scrapeResult.stream.playlist);
-          } else if (scrapeResult.stream.type === 'file') {
-            // file -> qualities map
-            const qualities = (scrapeResult.stream as any).qualities || {};
-            const keys = Object.keys(qualities);
-            if (keys.length) setResult(qualities[keys[0]].url);
-          }
-        }
-      }
+      setResult('http://d23dyxeqlo5psv.cloudfront.net/big_buck_bunny.mp4');
+      Alert.alert(
+        'Streaming disabled',
+        'Using sample video while native p-stream is disabled for Expo Go.'
+      );
     } catch (err: any) {
-      if (err instanceof NotFoundError) {
-        Alert.alert('Not found', 'Source reported not found');
-      } else {
-        console.error('Scrape error', err);
-        setError(String(err?.message || err));
-      }
+      setError(String(err?.message || err));
     } finally {
       setLoading(false);
     }
@@ -81,3 +38,5 @@ export function usePStream() {
 
   return { loading, error, result, scrape };
 }
+
+export default usePStream;

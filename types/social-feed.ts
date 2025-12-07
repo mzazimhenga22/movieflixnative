@@ -5,6 +5,7 @@ export interface Comment {
   id: number;
   user: string;
   text: string;
+  spoiler?: boolean;
 }
 
 // This is now the single source of truth for a review item's shape,
@@ -16,6 +17,7 @@ export interface Review {
   review: string;
   movie?: string;
   image?: ImageSourcePropType;
+  genres?: string[];
   likes: number;
   liked: boolean;
   bookmarked: boolean;
@@ -23,6 +25,8 @@ export interface Review {
   commentsCount: number;
   comments?: Comment[];
   retweet?: boolean;
+  likerAvatars?: ImageSourcePropType[];
+  videoUrl?: string;
 }
 
 // This type is no longer needed as Review now has the correct shape.

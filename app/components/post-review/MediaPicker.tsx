@@ -17,8 +17,12 @@ export default function MediaPicker({ onMediaPicked, onClose }: MediaPickerProps
         // ✅ Ask for permissions first
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('Permission required', 'Please allow media access to pick files.');
-          onClose();
+          Alert.alert(
+            'Permission required',
+            'Media access is needed to pick photos or videos. You can enable this later in system settings.'
+          );
+          // Stay on this screen instead of navigating away so you are not "locked out"
+          setIsLoading(false);
           return;
         }
 
@@ -32,17 +36,21 @@ export default function MediaPicker({ onMediaPicked, onClose }: MediaPickerProps
           quality: 1,
         });
 
-        if (!result.canceled) {
+        if (!result.canceled && result.assets && result.assets.length > 0) {
           const asset = result.assets[0];
           const mediaType = asset.type === 'video' ? 'video' : 'image';
           onMediaPicked(asset.uri, mediaType);
         } else {
-          onClose();
+          // If the picker reports "canceled" (including odd cases where the
+          // user thinks they selected something), just stop loading and
+          // stay on this screen instead of navigating back to the feed.
+          setIsLoading(false);
+          return;
         }
       } catch (error) {
         console.error('Error picking media:', error);
         Alert.alert('Error', 'An error occurred while picking media. Please try again.');
-        onClose();
+        // Do not auto-close; just stop the loader so user can try again
       } finally {
         setIsLoading(false);
       }

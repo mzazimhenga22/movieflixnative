@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View, Text, Image, TouchableOpacity, Animated, Easing } from 'react-native';
-import { FontAwesome } from '@expo/vector-icons';
+import { FontAwesome, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { IMAGE_BASE_URL } from '@/constants/api';
 import { Media } from '@/types';
@@ -9,10 +9,12 @@ import { useRouter } from 'expo-router';
 interface FeaturedMovieProps {
   movie: Media;
   getGenreNames: (genreIds: number[]) => string;
+  onInfoPress?: (movie: Media) => void;
 }
 
-const FeaturedMovie: React.FC<FeaturedMovieProps> = ({ movie, getGenreNames }) => {
+const FeaturedMovie: React.FC<FeaturedMovieProps> = ({ movie, getGenreNames, onInfoPress }) => {
   const slideAnim = useRef(new Animated.Value(250)).current; // Start position (off-screen below)
+  const parallax = useRef(new Animated.Value(0)).current;
   const router = useRouter();
 
   useEffect(() => {
@@ -23,6 +25,14 @@ const FeaturedMovie: React.FC<FeaturedMovieProps> = ({ movie, getGenreNames }) =
       useNativeDriver: true,
       easing: Easing.out(Easing.cubic),
     }).start();
+
+    parallax.setValue(0);
+    Animated.timing(parallax, {
+      toValue: 1,
+      duration: 700,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
   }, [movie]);
 
   const handlePress = () => {
@@ -31,26 +41,59 @@ const FeaturedMovie: React.FC<FeaturedMovieProps> = ({ movie, getGenreNames }) =
     }
   };
 
+
   if (!movie) return null;
 
   return (
     <View style={styles.cardContainer}>
-      <Animated.View style={{ transform: [{ translateY: slideAnim }] }}>
-        <TouchableOpacity onPress={handlePress} activeOpacity={0.9}>
+      <Animated.View
+        style={{
+          transform: [
+            { translateY: slideAnim },
+            {
+              translateY: parallax.interpolate({
+                inputRange: [0, 1],
+                outputRange: [12, 0],
+              }),
+            },
+          ],
+        }}
+      >
+        <TouchableOpacity onPress={handlePress} activeOpacity={0.92}>
           <LinearGradient
-            colors={['#1C1C1E', '#000000']}
+            colors={['rgba(255,255,255,0.08)', 'rgba(8,10,20,0.9)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
             style={styles.featuredMovieCard}
           >
             <Image
               source={{ uri: `${IMAGE_BASE_URL}${movie.poster_path}` }}
               style={styles.featuredMovieImage}
             />
-            <View style={styles.overlay}>
+            <LinearGradient
+              colors={['rgba(0,0,0,0.08)', 'rgba(0,0,0,0.45)']}
+              style={styles.overlay}
+            >
               <View style={styles.detailsRow}>
                 <View style={styles.detailsContainer}>
-                  <Text style={styles.featuredMovieTitle}>{movie.title || movie.name}</Text>
-                  <Text style={styles.featuredMovieInfo}>Release Date: {movie.release_date || movie.first_air_date}</Text>
-                  <Text style={styles.featuredMovieInfo}>Genres: {getGenreNames(movie.genre_ids || [])}</Text>
+                  <Text style={styles.eyebrow}>Featured tonight</Text>
+                  <Text style={styles.featuredMovieTitle} numberOfLines={2}>
+                    {movie.title || movie.name}
+                  </Text>
+                  <View style={styles.metaRow}>
+                    <View style={styles.matchPill}>
+                      <Text style={styles.matchText}>
+                        {((movie.vote_average || 0) * 10).toFixed(0)}% match
+                      </Text>
+                    </View>
+                    <Text style={styles.metaText}>
+                      {(movie.release_date || movie.first_air_date || '').slice(0, 4)}
+                    </Text>
+                    <Text style={styles.metaDot}>•</Text>
+                    <Text style={styles.metaText} numberOfLines={1}>
+                      {getGenreNames(movie.genre_ids || [])}
+                    </Text>
+                  </View>
                 </View>
                 <View style={styles.ratingContainer}>
                   <FontAwesome name="star" size={16} color="gold" />
@@ -58,15 +101,28 @@ const FeaturedMovie: React.FC<FeaturedMovieProps> = ({ movie, getGenreNames }) =
                 </View>
               </View>
               <View style={styles.featuredMovieActions}>
-                <TouchableOpacity style={styles.watchTrailerButton}>
-                  <FontAwesome name="play-circle" size={20} color="white" />
-                  <Text style={styles.watchTrailerButtonText}>Watch Trailer</Text>
+                <TouchableOpacity style={styles.primaryPlayButton} onPress={handlePress}>
+                  <Ionicons name="play" size={18} color="#000" />
+                  <Text style={styles.primaryPlayText}>Play</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.favoriteButton}>
-                  <FontAwesome name="heart-o" size={24} color="white" />
+                <TouchableOpacity style={styles.secondaryPill}>
+                  <FontAwesome name="plus" size={16} color="#fff" />
+                  <Text style={styles.secondaryText}>My List</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.secondaryIcon}
+                  onPress={() => {
+                    if (onInfoPress) {
+                      onInfoPress(movie);
+                    } else {
+                      handlePress();
+                    }
+                  }}
+                >
+                  <FontAwesome name="info-circle" size={18} color="#fff" />
                 </TouchableOpacity>
               </View>
-            </View>
+            </LinearGradient>
           </LinearGradient>
         </TouchableOpacity>
       </Animated.View>
@@ -76,15 +132,24 @@ const FeaturedMovie: React.FC<FeaturedMovieProps> = ({ movie, getGenreNames }) =
 
 const styles = StyleSheet.create({
   cardContainer: {
-    marginHorizontal: 15,
-    borderRadius: 15,
+    marginHorizontal: 16,
+    borderRadius: 20,
     overflow: 'hidden',
-    marginTop: 10,
+    marginTop: 0,
     height: 250,
+    backgroundColor: 'rgba(5,6,15,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.12,
+    shadowRadius: 28,
   },
   featuredMovieCard: {
     height: 250,
     justifyContent: 'flex-end',
+    borderRadius: 20,
+    overflow: 'hidden',
   },
   featuredMovieImage: {
     width: '100%',
@@ -94,8 +159,8 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   overlay: {
-    padding: 15,
-    backgroundColor: 'transparent',
+    padding: 16,
+    borderRadius: 18,
   },
   detailsRow: {
     flexDirection: 'row',
@@ -107,21 +172,56 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 10,
   },
+  eyebrow: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
   featuredMovieTitle: {
     color: 'white',
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 5,
+    fontSize: 22,
+    fontWeight: '800',
+    marginBottom: 4,
+    letterSpacing: 0.3,
   },
-  featuredMovieInfo: {
-    color: 'white',
-    fontSize: 14,
-    marginBottom: 3,
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+    gap: 6,
+  },
+  matchPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(229,9,20,0.96)',
+  },
+  matchText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  metaText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  metaDot: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 10,
   },
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingTop: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   ratingText: {
     color: 'white',
@@ -132,27 +232,45 @@ const styles = StyleSheet.create({
   featuredMovieActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 12,
+    gap: 10,
   },
-  watchTrailerButton: {
+  primaryPlayButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'red',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 20,
-    marginRight: 10,
+    backgroundColor: '#ffffff',
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+    borderRadius: 999,
   },
-  watchTrailerButtonText: {
-    color: 'white',
+  primaryPlayText: {
+    color: '#000',
     marginLeft: 8,
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 14,
+    fontWeight: '700',
   },
-  favoriteButton: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    padding: 8,
+  secondaryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  secondaryText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  secondaryIcon: {
+    padding: 9,
     borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
 });
 

@@ -1,12 +1,13 @@
 {
-  "extends": "expo/tsconfig.base",
+  // Use Expo's base config via module resolution
+  "extends": "./node_modules/expo/tsconfig.base.json",
   "compilerOptions": {
     "strict": true,
     "jsx": "react-native",
     "paths": {
       "@/*": ["./*"]
     },
-    // ✅ Suppress node_modules and package config errors
+    // Suppress node_modules and package config errors
     "skipLibCheck": true,
     "noEmit": true,
     "allowJs": true,
@@ -21,7 +22,7 @@
     "expo-env.d.ts",
     "types/**/*.d.ts"
   ],
-  // ✅ Ignore all node_modules including expo-av internal configs
+  // Ignore all node_modules including expo-av internal configs
   "exclude": [
     "node_modules",
     "babel.config.js",
