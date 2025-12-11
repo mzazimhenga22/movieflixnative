@@ -41,7 +41,7 @@ const LoginScreen = () => {
       setLoading(true);
       const user = await signInWithEmail(email.trim(), password);
       if (user) {
-        router.replace('/(tabs)/movies');
+        router.replace('/select-profile');
       } else {
         Alert.alert('Error', 'Invalid email or password. Please try again.');
       }

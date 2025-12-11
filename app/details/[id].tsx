@@ -19,6 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { getAccentFromPosterPath } from '../../constants/theme';
+import { getProfileScopedKey } from '../../lib/profileStorage';
 
 interface Video {
   key: string;
@@ -52,7 +53,7 @@ const MovieDetailsContainer: React.FC = () => {
       setIsLoading(true);
       try {
         const [detailsRes, videosRes, relatedRes, creditsRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/${mediaType}/${id}?api_key=${API_KEY}`),
+          fetch(`${API_BASE_URL}/${mediaType}/${id}?api_key=${API_KEY}&append_to_response=external_ids`),
           fetch(`${API_BASE_URL}/${mediaType}/${id}/videos?api_key=${API_KEY}`),
           fetch(`${API_BASE_URL}/${mediaType}/${id}/recommendations?api_key=${API_KEY}`),
           fetch(`${API_BASE_URL}/${mediaType}/${id}/credits?api_key=${API_KEY}`),
@@ -65,7 +66,13 @@ const MovieDetailsContainer: React.FC = () => {
 
         if (!mounted) return;
 
-        setMovie(detailsData || null);
+        const normalizedDetails = detailsData
+          ? {
+              ...detailsData,
+              imdb_id: detailsData.imdb_id ?? detailsData.external_ids?.imdb_id ?? null,
+            }
+          : null;
+        setMovie(normalizedDetails);
         setTrailers(
           (videosData?.results || []).filter(
             (video: Video) => video.site === 'YouTube' && video.type === 'Trailer'
@@ -117,12 +124,13 @@ const MovieDetailsContainer: React.FC = () => {
 
   const handleAddToMyList = async (movie: Media) => {
     try {
-      const myList = await AsyncStorage.getItem('myList');
+      const listKey = await getProfileScopedKey('myList');
+      const myList = await AsyncStorage.getItem(listKey);
       const list = myList ? JSON.parse(myList) : [];
       const alreadyInList = list.find((item: Media) => item.id === movie.id);
       if (!alreadyInList) {
         list.push(movie);
-        await AsyncStorage.setItem('myList', JSON.stringify(list));
+        await AsyncStorage.setItem(listKey, JSON.stringify(list));
         alert('Added to My List');
       } else {
         alert('Already in My List');

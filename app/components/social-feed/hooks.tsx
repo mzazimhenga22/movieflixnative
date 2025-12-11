@@ -1,31 +1,30 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Alert } from 'react-native';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import {
+  collection,
+  getDocs,
+  orderBy,
+  query,
+  limit,
+  doc,
+  updateDoc,
+  increment,
+  addDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
 import { firestore } from '../../../constants/firebase';
 import { supabase, supabaseConfigured } from '../../../constants/supabase';
+import { useUser } from '../../../hooks/use-user';
+import type { FeedCardItem, Comment as FeedComment } from '../../../types/social-feed';
 
-export type ReviewItem = {
-  id: number;
-  user: string;
-  avatar?: string;
-  date: string;
-  review: string;
-  movie?: string;
-  image?: any;
-  genres?: string[];
-  likes: number;
-  // comments can be a simple count or an array of comment objects
-  commentsCount: number;
-  comments?: Array<{ id: number; user: string; text: string; spoiler?: boolean }>;
-  watched: number;
-  retweet: boolean;
-  liked: boolean;
-  bookmarked: boolean;
-  videoUrl?: string;
+export type ReviewItem = FeedCardItem & {
+  docId?: string;
+  origin?: 'firestore' | 'supabase';
 };
 
 export function useSocialReactions() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const { user } = useUser();
 
   const refreshReviews = useCallback(async () => {
     try {
@@ -47,6 +46,9 @@ export function useSocialReactions() {
 
             return {
               id: row.id ?? index + 1,
+              docId: undefined,
+              origin: 'supabase',
+              userId: row.userId ?? row.user_id ?? null,
               user: row.userDisplayName || row.userName || row.user || 'watcher',
               avatar: row.userAvatar || undefined,
               date: createdAt.toLocaleDateString(),
@@ -77,31 +79,65 @@ export function useSocialReactions() {
           return;
         }
 
-        items = snapshot.docs.map((docSnap, index) => {
-          const data = docSnap.data() as any;
-          const createdAt = (data.createdAt as any)?.toDate
-            ? (data.createdAt as any).toDate()
-            : new Date();
+        items = await Promise.all(
+          snapshot.docs.map(async (docSnap) => {
+            const data = docSnap.data() as any;
+            const createdAt = (data.createdAt as any)?.toDate
+              ? (data.createdAt as any).toDate()
+              : new Date();
 
-          return {
-            id: index + 1,
-            user: data.userDisplayName || data.userName || 'watcher',
-            avatar: data.userAvatar || undefined,
-            date: createdAt.toLocaleDateString(),
-            review: data.review || '',
-            movie: data.title || data.movie || undefined,
-            image: data.type === 'video' ? undefined : (data.mediaUrl ? { uri: data.mediaUrl } : undefined),
-            genres: data.genres || [],
-            likes: data.likes ?? 0,
-            commentsCount: data.commentsCount ?? 0,
-            comments: data.comments || undefined,
-            watched: data.watched ?? 0,
-            retweet: false,
-            liked: false,
-            bookmarked: false,
-            videoUrl: data.videoUrl || (data.type === 'video' ? data.mediaUrl : undefined),
-          };
-        });
+            let comments: FeedComment[] | undefined = undefined;
+            try {
+              const commentsRef = collection(firestore, 'reviews', docSnap.id, 'comments');
+              const commentsQuery = query(commentsRef, orderBy('createdAt', 'desc'), limit(20));
+              const commentsSnap = await getDocs(commentsQuery);
+              if (!commentsSnap.empty) {
+                comments = commentsSnap.docs.map((commentDoc) => {
+                  const commentData = commentDoc.data() as any;
+                  return {
+                    id: commentDoc.id,
+                    user:
+                      commentData.userDisplayName ||
+                      commentData.userName ||
+                      commentData.user ||
+                      'Movie fan',
+                    text: commentData.text || '',
+                    spoiler: Boolean(commentData.spoiler),
+                  };
+                });
+              }
+            } catch (err) {
+              console.warn('Failed to load comments for review', docSnap.id, err);
+            }
+
+            return {
+              id: docSnap.id,
+              docId: docSnap.id,
+              origin: 'firestore' as const,
+              userId: data.userId ?? data.ownerId ?? null,
+              user: data.userDisplayName || data.userName || 'watcher',
+              avatar: data.userAvatar || undefined,
+              date: createdAt.toLocaleDateString(),
+              review: data.review || '',
+              movie: data.title || data.movie || undefined,
+              image:
+                data.type === 'video'
+                  ? undefined
+                  : data.mediaUrl
+                  ? { uri: data.mediaUrl }
+                  : undefined,
+              genres: data.genres || [],
+              likes: data.likes ?? 0,
+              commentsCount: data.commentsCount ?? (comments ? comments.length : 0),
+              comments,
+              watched: data.watched ?? 0,
+              retweet: false,
+              liked: false,
+              bookmarked: false,
+              videoUrl: data.videoUrl || (data.type === 'video' ? data.mediaUrl : undefined),
+            };
+          }),
+        );
       }
 
       setReviews(items);
@@ -115,51 +151,160 @@ export function useSocialReactions() {
     refreshReviews();
   }, [refreshReviews]);
 
-  const handleLike = (id: number) => {
+  const createNotification = useCallback(
+    async ({
+      targetUid,
+      type,
+      actorName,
+      actorAvatar,
+      targetId,
+      docPath,
+      message,
+    }: {
+      targetUid?: string | null;
+      type: 'like' | 'comment';
+      actorName: string;
+      actorAvatar?: string | null;
+      targetId?: string | number;
+      docPath?: string;
+      message: string;
+    }) => {
+      if (!targetUid || !user?.uid || targetUid === user.uid) return;
+      try {
+        await addDoc(collection(firestore, 'notifications'), {
+          type,
+          scope: 'social',
+          channel: 'community',
+          actorId: user.uid,
+          actorName,
+          actorAvatar: actorAvatar ?? null,
+          targetUid,
+          targetType: 'feed',
+          targetId: targetId ?? null,
+          docPath: docPath ?? null,
+          message,
+          read: false,
+          createdAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Failed to create notification', err);
+      }
+    },
+    [user?.uid, user?.displayName],
+  );
+
+  const handleLike = (id: ReviewItem['id']) => {
+    const targetReview = reviews.find((item) => item.id === id);
+    if (!targetReview) return;
+    const nextLiked = !targetReview.liked;
+    const delta = nextLiked ? 1 : -1;
+
     setReviews((prev) =>
       prev.map((item) =>
         item.id === id
-          ? { ...item, liked: !item.liked, likes: item.liked ? item.likes - 1 : item.likes + 1 }
-          : item
-      )
+          ? { ...item, liked: nextLiked, likes: Math.max(0, item.likes + delta) }
+          : item,
+      ),
     );
+
+    if (targetReview.origin === 'firestore' && targetReview.docId) {
+      const reviewRef = doc(firestore, 'reviews', targetReview.docId);
+      updateDoc(reviewRef, {
+        likes: increment(delta),
+        updatedAt: serverTimestamp(),
+      }).catch((err) => console.warn('Failed to persist like', err));
+
+      if (nextLiked) {
+        const actorName =
+          user?.displayName || user?.email?.split('@')[0] || 'Movie fan';
+        createNotification({
+          targetUid: targetReview.userId,
+          type: 'like',
+          actorName,
+          actorAvatar: (user as any)?.photoURL ?? null,
+          targetId: targetReview.docId,
+          docPath: `reviews/${targetReview.docId}`,
+          message: `${actorName} liked your feed${targetReview.movie ? ` about "${targetReview.movie}"` : ''}.`,
+        });
+      }
+    }
   };
 
-  const handleBookmark = (id: number) => {
+  const handleBookmark = (id: ReviewItem['id']) => {
     setReviews((prev) =>
       prev.map((item) => (item.id === id ? { ...item, bookmarked: !item.bookmarked } : item))
     );
   };
 
-  const handleComment = (id: number) => {
+  const handleComment = (id: ReviewItem['id'], text?: string) => {
+    const trimmed = text?.trim();
+    if (!trimmed) return;
+
+    const commenter =
+      user?.displayName || user?.email?.split('@')[0] || user?.uid || 'You';
+
+    let pendingDoc: { docId: string } | null = null;
+    const localComment = {
+      id: Date.now(),
+      user: commenter,
+      text: trimmed,
+      spoiler: false,
+    };
+
     setReviews((prev) =>
-      prev.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              commentsCount: item.commentsCount + 1,
-              comments: [
-                ...(item.comments || []),
-                {
-                  id: Date.now(),
-                  user: 'current_user',
-                  text: 'New comment',
-                  spoiler: false,
-                },
-              ],
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        if (item.origin === 'firestore' && item.docId) {
+          pendingDoc = { docId: item.docId };
+        }
+        return {
+          ...item,
+          commentsCount: item.commentsCount + 1,
+          comments: [localComment, ...(item.comments || [])],
+        };
+      })
     );
+
+    if (pendingDoc) {
+      const reviewRef = doc(firestore, 'reviews', pendingDoc.docId);
+      const commentsRef = collection(reviewRef, 'comments');
+      const payload = {
+        userId: user?.uid ?? 'anonymous',
+        userDisplayName: commenter,
+        text: trimmed,
+        spoiler: false,
+        createdAt: serverTimestamp(),
+      };
+
+      const commentPromise = addDoc(commentsRef, payload).then((commentDoc) => {
+        createNotification({
+          targetUid: reviews.find((r) => r.id === id)?.userId,
+          type: 'comment',
+          actorName: commenter,
+          actorAvatar: (user as any)?.photoURL ?? null,
+          targetId: pendingDoc!.docId,
+          docPath: commentDoc.path,
+          message: `${commenter} commented on your feed${trimmed ? `: "${trimmed.slice(0, 60)}${trimmed.length > 60 ? '…' : ''}"` : ''}`,
+        });
+      });
+
+      Promise.all([
+        updateDoc(reviewRef, {
+          commentsCount: increment(1),
+          updatedAt: serverTimestamp(),
+        }),
+        commentPromise,
+      ]).catch((err) => console.warn('Failed to persist comment', err));
+    }
   };
 
-  const handleWatch = (id: number) => {
+  const handleWatch = (id: ReviewItem['id']) => {
     setReviews((prev) =>
       prev.map((item) => (item.id === id ? { ...item, watched: item.watched + 1 } : item))
     );
   };
 
-  const handleShare = (id: number) => {
+  const handleShare = (id: ReviewItem['id']) => {
     Alert.alert('Share', `Share review ${id}`);
   };
 

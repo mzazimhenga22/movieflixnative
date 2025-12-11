@@ -13,19 +13,23 @@ interface Episode {
   overview: string;
   runtime: number;
   still_path: string | null;
+  season_number?: number;
 }
 
 interface Season {
   id: number;
   name: string;
+  season_number?: number;
   episodes: Episode[];
 }
 
 interface EpisodeListProps {
   seasons: Season[];
+  onPlayEpisode?: (episode: Episode, season: Season) => void;
+  disabled?: boolean;
 }
 
-const EpisodeList: React.FC<EpisodeListProps> = ({ seasons }) => {
+const EpisodeList: React.FC<EpisodeListProps> = ({ seasons, onPlayEpisode, disabled }) => {
   const [selectedSeason, setSelectedSeason] = useState<Season | null>(seasons.length > 0 ? seasons[0] : null);
 
   const handleSeasonChange = (season: Season) => {
@@ -65,8 +69,15 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ seasons }) => {
                     <Text style={styles.episodeName} numberOfLines={1}>
                       {episode.episode_number}. {episode.name}
                     </Text>
-                    <TouchableOpacity>
-                      <FontAwesome name="play-circle" size={28} color="white" />
+                    <TouchableOpacity
+                      disabled={disabled}
+                      onPress={() => selectedSeason && onPlayEpisode?.(episode, selectedSeason)}
+                    >
+                      <FontAwesome
+                        name="play-circle"
+                        size={28}
+                        color={disabled ? 'rgba(255,255,255,0.4)' : 'white'}
+                      />
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.episodeOverview} numberOfLines={2}>

@@ -12,6 +12,7 @@ import { IMAGE_BASE_URL } from '@/constants/api';
 import { Media } from '@/types';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getProfileScopedKey } from '@/lib/profileStorage';
 
 interface MovieListProps {
   title: string;
@@ -27,13 +28,13 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true, o
   useEffect(() => {
     const loadMyList = async () => {
       try {
-        const stored = await AsyncStorage.getItem('myList');
-        if (stored) {
-          const parsed: Media[] = JSON.parse(stored);
-          setMyListIds(parsed.map((m) => m.id));
-        }
+        const key = await getProfileScopedKey('myList');
+        const stored = await AsyncStorage.getItem(key);
+        const parsed: Media[] = stored ? JSON.parse(stored) : [];
+        setMyListIds(parsed.map((m) => m.id));
       } catch (err) {
         console.error('Failed to load My List', err);
+        setMyListIds([]);
       }
     };
     loadMyList();
@@ -41,7 +42,8 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true, o
 
   const toggleMyList = async (item: Media) => {
     try {
-      const stored = await AsyncStorage.getItem('myList');
+      const key = await getProfileScopedKey('myList');
+      const stored = await AsyncStorage.getItem(key);
       const existing: Media[] = stored ? JSON.parse(stored) : [];
       const exists = existing.find((m) => m.id === item.id);
       let updated: Media[];
@@ -51,7 +53,7 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true, o
         updated = [...existing, item];
       }
       setMyListIds(updated.map((m) => m.id));
-      await AsyncStorage.setItem('myList', JSON.stringify(updated));
+      await AsyncStorage.setItem(key, JSON.stringify(updated));
     } catch (err) {
       console.error('Failed to update My List', err);
     }

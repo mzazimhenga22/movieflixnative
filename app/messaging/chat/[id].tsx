@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   Image,
   TextInput,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -29,6 +30,7 @@ import {
   editMessage,
   pinMessage,
   unpinMessage,
+  Conversation,
 } from '../controller';
 
 import ScreenWrapper from '../../../components/ScreenWrapper';
@@ -43,27 +45,52 @@ import { decode } from 'base-64';
 import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { Video, ResizeMode } from 'expo-av';
+import { getChatStreak, updateStreakForContext } from '@/lib/streaks/streakManager';
+import { createCallSession } from '@/lib/calls/callService';
+import type { CallType } from '@/lib/calls/types';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
+type AuthUser = {
+  uid: string;
+  displayName?: string | null;
+  email?: string | null;
+  photoURL?: string | null;
+} & Partial<Profile>;
+
+type ChatMessage = {
+  id?: string;
+  text?: string;
+  sender?: string;
+  mediaUrl?: string | null;
+  mediaType?: 'image' | 'video' | 'file' | null;
+  deleted?: boolean;
+  deletedFor?: string[];
+  pinnedBy?: string[];
+  createdAt?: number;
+  [key: string]: any;
+};
+
 const ChatScreen = () => {
-  const { id } = useLocalSearchParams();
+  const { id, fromStreak } = useLocalSearchParams();
   const router = useRouter();
 
-  const [user, setUser] = useState<any>(null);
-  const [conversation, setConversation] = useState<any>(null);
-  const [messages, setMessages] = useState<any[]>([]);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
   const [isOtherTyping, setIsOtherTyping] = useState(false);
-  const [selectedMessage, setSelectedMessage] = useState<any | null>(null);
+  const [selectedMessage, setSelectedMessage] = useState<ChatMessage | null>(null);
   const [selectedMessageRect, setSelectedMessageRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [replyTo, setReplyTo] = useState<any | null>(null);
-  const [editingMessage, setEditingMessage] = useState<any | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+  const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null);
   const [pendingMedia, setPendingMedia] = useState<{ uri: string; type: 'image' | 'video' | 'file' } | null>(null);
   const [pendingCaption, setPendingCaption] = useState<string>('');
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<FlatList<ChatMessage>>(null);
+  const [streakCount, setStreakCount] = useState<number>(0);
+  const [isStartingCall, setIsStartingCall] = useState(false);
 
   const scrollToBottom = useCallback((animated = true) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -98,38 +125,92 @@ const ChatScreen = () => {
   }, [conversation, id, user?.uid]);
 
   useEffect(() => {
+    const loadStreak = async () => {
+      if (!id) return;
+      try {
+        const streak = await getChatStreak(String(id));
+        if (streak && typeof streak.count === 'number') {
+          setStreakCount(streak.count);
+        } else {
+          setStreakCount(0);
+        }
+      } catch {
+        setStreakCount(0);
+      }
+    };
+
+    void loadStreak();
+  }, [id]);
+
+  useEffect(() => {
     if (messages.length > 0) {
       scrollToBottom(true);
     }
   }, [messages, scrollToBottom]);
 
-  const visibleMessages = useMemo(() => {
+  const visibleMessages = useMemo<ChatMessage[]>(() => {
     if (!user) return messages;
-    return messages.filter((m: any) => {
+    return messages.filter((m) => {
       if (m.deleted) return false;
-      if (Array.isArray(m.deletedFor) && m.deletedFor.includes(user.uid)) {
+      if (Array.isArray(m.deletedFor) && user?.uid && m.deletedFor.includes(user.uid)) {
         return false;
       }
       return true;
     });
   }, [messages, user]);
 
-  const mediaMessages = useMemo(() => {
+  const mediaMessages = useMemo<ChatMessage[]>(() => {
     return visibleMessages.filter(
-      (m: any) =>
-        m.mediaUrl &&
-        (m.mediaType === 'image' || m.mediaType === 'video'),
+      (m) => m.mediaUrl && (m.mediaType === 'image' || m.mediaType === 'video'),
     );
   }, [visibleMessages]);
 
-  const pinnedMessage = useMemo(() => {
-    if (!user) return null;
-    const pinnedForUser = messages.filter(
-      (m: any) => Array.isArray(m.pinnedBy) && m.pinnedBy.includes(user.uid),
-    );
-    if (pinnedForUser.length === 0) return null;
-    return pinnedForUser[pinnedForUser.length - 1];
-  }, [messages, user]);
+  const pinnedMessage = useMemo<ChatMessage | null>(() => {
+    if (!user?.uid) return null;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const message = messages[i];
+      if (Array.isArray(message.pinnedBy) && message.pinnedBy.includes(user.uid)) {
+        return message;
+      }
+    }
+    return null;
+  }, [messages, user?.uid]);
+
+  const handleStartCall = useCallback(
+    async (mode: CallType) => {
+      if (!conversation || !conversation.id || !Array.isArray(conversation.members)) {
+        Alert.alert('Call unavailable', 'Conversation members are missing.');
+        return;
+      }
+      if (!user?.uid) {
+        Alert.alert('Call unavailable', 'Please sign in to start a call.');
+        return;
+      }
+      if (isStartingCall) return;
+      setIsStartingCall(true);
+      try {
+        const call = await createCallSession({
+          conversationId: conversation.id,
+          members: conversation.members,
+          type: mode,
+          initiatorId: user.uid,
+          isGroup: !!conversation.isGroup,
+          conversationName: conversation.isGroup
+            ? conversation.name || 'Group'
+            : otherUser?.displayName || 'Chat',
+          initiatorName: user.displayName ?? null,
+        });
+        router.push({ pathname: '/calls/[id]', params: { id: call.callId } });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'We could not start the call.';
+        Alert.alert('Unable to start call', message);
+      } finally {
+        setIsStartingCall(false);
+      }
+    },
+    [conversation, user?.uid, otherUser?.displayName, router, isStartingCall],
+  );
 
   const uploadChatMedia = useCallback(
     async (uri: string, type: 'image' | 'video' | 'file'): Promise<{ url: string; mediaType: 'image' | 'video' | 'file' } | null> => {
@@ -176,6 +257,20 @@ const ChatScreen = () => {
     [conversation?.isGroup, id, user],
   );
 
+  const updateChatStreak = useCallback(async () => {
+    if (!id) return;
+    await updateStreakForContext({
+      kind: 'chat',
+      conversationId: String(id),
+      partnerId: otherUser?.id ?? null,
+      partnerName: otherUser?.displayName ?? null,
+    });
+    const streak = await getChatStreak(String(id));
+    if (streak && typeof streak.count === 'number') {
+      setStreakCount(streak.count);
+    }
+  }, [id, otherUser]);
+
   const handleSendMessage = async (text: string) => {
     if (!text.trim() || !user) return;
 
@@ -198,6 +293,9 @@ const ChatScreen = () => {
       }
 
       sendMessage(id as string, newMessage);
+      if (fromStreak) {
+        void updateChatStreak();
+      }
     }
 
     setReplyTo(null);
@@ -242,8 +340,14 @@ const ChatScreen = () => {
     const uploaded = await uploadChatMedia(pendingMedia.uri, pendingMedia.type);
     if (!uploaded) return;
 
-    const newMessage: any = {
-      text: pendingCaption.trim() || (pendingMedia.type === 'image' ? 'Photo' : pendingMedia.type === 'video' ? 'Video' : 'File'),
+    const newMessage: ChatMessage = {
+      text:
+        pendingCaption.trim() ||
+        (pendingMedia.type === 'image'
+          ? 'Photo'
+          : pendingMedia.type === 'video'
+          ? 'Video'
+          : 'File'),
       sender: user.uid,
       mediaUrl: uploaded.url,
       mediaType: uploaded.mediaType,
@@ -254,15 +358,15 @@ const ChatScreen = () => {
     setPendingCaption('');
   };
 
-  const handleOpenMedia = (message: any) => {
+  const handleOpenMedia = (message: ChatMessage) => {
     if (!message?.mediaUrl || !message.mediaType) return;
     if (message.mediaType !== 'image' && message.mediaType !== 'video') return;
 
-    const index = mediaMessages.findIndex((m: any) => m.id === message.id);
+    const index = mediaMessages.findIndex((m) => m.id === message.id);
     if (index < 0) return;
 
-    const mediaPayload = mediaMessages.map((m: any) => ({
-      id: m.id,
+    const mediaPayload = mediaMessages.map((m, idx) => ({
+      id: m.id ?? `media-${idx}`,
       url: m.mediaUrl,
       type: m.mediaType,
     }));
@@ -294,7 +398,15 @@ const ChatScreen = () => {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
           >
           <View style={styles.container}>
-            <ChatHeader recipient={otherUser} conversation={conversation} isTyping={isOtherTyping} />
+            <ChatHeader
+              recipient={otherUser}
+              conversation={conversation}
+              isTyping={isOtherTyping}
+              streakCount={streakCount}
+              onStartVoiceCall={() => handleStartCall('voice')}
+              onStartVideoCall={() => handleStartCall('video')}
+              callDisabled={isStartingCall}
+            />
             {pinnedMessage && (
               <View style={styles.pinnedBanner}>
                 <Ionicons name="pin" size={14} color="rgba(255,255,255,0.9)" style={{ marginRight: 6 }} />
@@ -321,7 +433,7 @@ const ChatScreen = () => {
                     onPressMedia={handleOpenMedia}
                   />
               )}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => item.id ?? `message-${index}`}
               contentContainerStyle={styles.messageList}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"

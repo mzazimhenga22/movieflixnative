@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,6 +27,7 @@ interface Props {
   onPlayMovie: () => void; // New prop for playing movie via p-stream
   isPStreamPlaying: boolean; // New prop to indicate if p-stream is playing
   accentColor: string;
+  isPlayLoading?: boolean;
 }
 
 const MovieHeader: React.FC<Props> = ({
@@ -37,6 +39,7 @@ const MovieHeader: React.FC<Props> = ({
   onPlayMovie,
   isPStreamPlaying,
   accentColor,
+  isPlayLoading,
 }) => {
   const backdropUri = movie ? `${IMAGE_BASE_URL}${movie.backdrop_path || movie.poster_path}` : null;
 
@@ -87,13 +90,18 @@ const MovieHeader: React.FC<Props> = ({
         style={styles.mainPlayButton}
         onPress={isPStreamPlaying ? onBack : onPlayMovie}
         accessibilityLabel={isPStreamPlaying ? 'Close player' : 'Play movie'}
+        disabled={isPlayLoading}
       >
         <View style={styles.mainPlayOuter}>
-          <FontAwesome
-            name={isPStreamPlaying ? 'compress' : 'play-circle'}
-            size={66}
-            color="rgba(255,255,255,0.96)"
-          />
+          {isPlayLoading ? (
+            <ActivityIndicator size="large" color="#fff" />
+          ) : (
+            <FontAwesome
+              name={isPStreamPlaying ? 'compress' : 'play-circle'}
+              size={66}
+              color="rgba(255,255,255,0.96)"
+            />
+          )}
         </View>
       </TouchableOpacity>
 

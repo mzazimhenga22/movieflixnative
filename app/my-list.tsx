@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, StyleSheet, FlatList, TouchableOpacity, Text, Image } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,30 +7,51 @@ import ScreenWrapper from '../components/ScreenWrapper';
 import { ThemedText } from '../components/themed-text';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Media } from '../types';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { IMAGE_BASE_URL } from '../constants/api';
 import { getAccentFromPosterPath } from '../constants/theme';
+import { getProfileScopedKey } from '../lib/profileStorage';
 
 const MyListScreen = () => {
   const [myList, setMyList] = useState<Media[]>([]);
   const router = useRouter();
 
-  useEffect(() => {
-    const fetchMyList = async () => {
-      try {
-        const list = await AsyncStorage.getItem('myList');
-        if (list) {
-          setMyList(JSON.parse(list));
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const fetchMyList = async () => {
+        try {
+          const key = await getProfileScopedKey('myList');
+          const list = await AsyncStorage.getItem(key);
+          if (!isActive) return;
+          setMyList(list ? JSON.parse(list) : []);
+        } catch (error) {
+          if (isActive) {
+            console.error('Error fetching My List:', error);
+            setMyList([]);
+          }
         }
-      } catch (error) {
-        console.error('Error fetching My List:', error);
-      }
-    };
-    fetchMyList();
-  }, []);
+      };
+
+      fetchMyList();
+
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
 
   const accentColor = getAccentFromPosterPath(myList[0]?.poster_path);
+  const tonightPick = myList.length
+    ? myList.reduce((best, item) => {
+        if (!best) return item;
+        const bestScore = (best.vote_average ?? 0) + (best.popularity ?? 0) * 0.01;
+        const currentScore = (item.vote_average ?? 0) + (item.popularity ?? 0) * 0.01;
+        return currentScore > bestScore ? item : best;
+      }, myList[0] as Media)
+    : null;
 
   return (
     <ScreenWrapper>
@@ -83,6 +104,45 @@ const MyListScreen = () => {
               </TouchableOpacity>
             </View>
           </View>
+
+          {tonightPick && (
+            <TouchableOpacity
+              onPress={() =>
+                router.push(
+                  `/details/${tonightPick.id}?mediaType=${tonightPick.media_type || 'movie'}`
+                )
+              }
+            >
+              <BlurView intensity={70} tint="dark" style={styles.tonightCard}>
+                <LinearGradient
+                  colors={['rgba(229,9,20,0.26)', 'rgba(255,255,255,0.06)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.glassSheen}
+                />
+                <View style={styles.tonightRow}>
+                  <View style={styles.tonightPosterWrap}>
+                    <Image
+                      source={{ uri: `${IMAGE_BASE_URL}${tonightPick.poster_path}` }}
+                      style={styles.tonightPoster}
+                    />
+                  </View>
+                  <View style={styles.tonightTextWrap}>
+                    <Text style={styles.tonightLabel}>Tonight&apos;s Pick</Text>
+                    <Text style={styles.tonightTitle} numberOfLines={2}>
+                      {tonightPick.title || tonightPick.name}
+                    </Text>
+                    <Text style={styles.tonightSubtitle} numberOfLines={1}>
+                      Based on your list & ratings
+                    </Text>
+                  </View>
+                  <View style={styles.tonightIconWrap}>
+                    <Ionicons name="play-circle" size={30} color="#ffffff" />
+                  </View>
+                </View>
+              </BlurView>
+            </TouchableOpacity>
+          )}
 
           <FlatList
             data={myList}
@@ -237,6 +297,51 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 4,
     paddingBottom: 160,
+  },
+  tonightCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(229,9,20,0.3)',
+    backgroundColor: 'rgba(10,12,24,0.9)',
+    marginHorizontal: 16,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  tonightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  tonightPosterWrap: {
+    width: 70,
+    marginRight: 10,
+  },
+  tonightPoster: {
+    width: '100%',
+    aspectRatio: 2 / 3,
+    borderRadius: 10,
+  },
+  tonightTextWrap: {
+    flex: 1,
+  },
+  tonightLabel: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  tonightTitle: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  tonightSubtitle: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 11,
+  },
+  tonightIconWrap: {
+    marginLeft: 8,
   },
   itemGlass: {
     borderRadius: 12,

@@ -10,7 +10,9 @@ import {
   useWindowDimensions,
   Image,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { onStoriesUpdate } from './storiesController';
+import { updateStreakForContext } from '@/lib/streaks/streakManager';
 
 interface Props {
   showAddStory?: boolean;
@@ -21,8 +23,9 @@ export default function StoriesRow({ showAddStory = false }: Props) {
   const { width } = useWindowDimensions();
   const [stories, setStories] = useState<any[]>([]);
   // make item spacing responsive a bit
-  const itemSize = width >= 420 ? 98 : 84; // avatar diameter
-  const avatarInner = Math.round(itemSize * 0.78); // inner avatar size
+  const itemSize = width >= 420 ? 98 : 84;
+  const avatarInner = Math.round(itemSize * 0.74);
+  const ringSize = itemSize + 8;
 
   useEffect(() => {
     const unsubscribe = onStoriesUpdate((rawStories) => {
@@ -68,21 +71,45 @@ export default function StoriesRow({ showAddStory = false }: Props) {
       >
         {showAddStory && (
           <TouchableOpacity
-            onPress={handleStoryUpload}
-            style={[styles.storyItem, { width: itemSize }]}
+            onPress={() => {
+              handleStoryUpload();
+              void updateStreakForContext({ kind: 'story', userId: 'me', username: 'You' });
+            }}
+            style={styles.storyCard}
             activeOpacity={0.85}
             accessibilityRole="button"
             accessibilityLabel="Add your story"
           >
-            <View style={[styles.ring, styles.addRing, { width: itemSize, height: itemSize, borderRadius: itemSize / 2 }]}>
-              <View style={[styles.avatarInnerWrap, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]}>
-                <View style={[styles.avatar, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]} />
-                <View style={[styles.plusBtn, { right: -8, bottom: -8 }]}>
+            <LinearGradient
+              colors={['#3d3d3d', '#1c1c1c']}
+              style={[styles.statusRing, { width: ringSize, height: ringSize, borderRadius: ringSize / 2 }]}
+            >
+              <View
+                style={[
+                  styles.avatarInnerWrap,
+                  {
+                    width: avatarInner,
+                    height: avatarInner,
+                    borderRadius: avatarInner / 2,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.avatar,
+                    {
+                      width: avatarInner,
+                      height: avatarInner,
+                      borderRadius: avatarInner / 2,
+                    },
+                  ]}
+                />
+                <View style={styles.plusBtn}>
                   <Ionicons name="add" size={16} color="#fff" />
                 </View>
               </View>
-            </View>
-            <Text style={styles.storyText} numberOfLines={1} ellipsizeMode="tail">
+            </LinearGradient>
+            <Text style={styles.storyText} numberOfLines={1}>
               Your story
             </Text>
             <Text style={styles.smallText}>Tap to add</Text>
@@ -93,33 +120,60 @@ export default function StoriesRow({ showAddStory = false }: Props) {
         {stories.map((story) => (
           <TouchableOpacity
             key={story.id}
-            style={[styles.storyItem, { width: itemSize }]}
+            style={styles.storyCard}
             activeOpacity={0.92}
             accessibilityRole="button"
             accessibilityLabel={`${story.username}'s story`}
-            onPress={() =>
-              router.push(
-                `/story/${story.id}?photoURL=${encodeURIComponent(story.photoURL ?? '')}`
-              )
-            }
+            onPress={() => {
+              router.push(`/story/${story.id}?photoURL=${encodeURIComponent(story.photoURL ?? '')}`);
+              void updateStreakForContext({
+                kind: 'story',
+                userId: story.userId,
+                username: story.username,
+              });
+            }}
           >
-            <View style={[styles.ring, { width: itemSize, height: itemSize, borderRadius: itemSize / 2 }]}>
-              <View style={[styles.avatarInnerWrap, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]}>
+            <LinearGradient
+              colors={['#25D366', '#128C7E']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.statusRing, { width: ringSize, height: ringSize, borderRadius: ringSize / 2 }]}
+            >
+              <View
+                style={[
+                  styles.avatarInnerWrap,
+                  {
+                    width: avatarInner,
+                    height: avatarInner,
+                    borderRadius: avatarInner / 2,
+                  },
+                ]}
+              >
                 {story.photoURL ? (
                   <Image
                     source={{ uri: story.photoURL }}
-                    style={[styles.avatarImage, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]}
-                    resizeMode="cover"
+                    style={[
+                      styles.avatarImage,
+                      { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 },
+                    ]}
                   />
                 ) : (
-                  <View style={[styles.avatar, { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 }]} />
+                  <View
+                    style={[
+                      styles.avatar,
+                      { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 },
+                    ]}
+                  />
                 )}
               </View>
-            </View>
-            <Text style={styles.storyText} numberOfLines={1} ellipsizeMode="tail">
+            </LinearGradient>
+            <Text style={styles.storyText} numberOfLines={1}>
               {story.username}
             </Text>
-            <Text style={styles.smallText}>Live</Text>
+            <View style={styles.metaRow}>
+              <View style={styles.metaDot} />
+              <Text style={styles.metaText}>Tap to view</Text>
+            </View>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -135,64 +189,74 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     alignItems: 'center',
   },
-  storyItem: {
+  storyCard: {
     alignItems: 'center',
     marginRight: 18,
   },
-  ring: {
+  statusRing: {
     alignItems: 'center',
     justifyContent: 'center',
-    // simulated gradient ring using layered borders (suits most designs without extra deps)
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.04)',
-    backgroundColor: 'transparent',
+    padding: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    elevation: 3,
-  },
-  addRing: {
-    // warmer accent for add/personal story
-    borderColor: 'rgba(255,61,61,0.18)',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
   },
   avatarInnerWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.02)',
+    backgroundColor: '#111',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
   },
   avatarImage: {
-    backgroundColor: '#111',
+    width: '100%',
+    height: '100%',
   },
   avatar: {
+    width: '100%',
+    height: '100%',
     backgroundColor: '#2f2f2f',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.03)',
   },
   plusBtn: {
     position: 'absolute',
-    backgroundColor: '#ff3d3d',
+    bottom: -6,
+    right: -6,
+    backgroundColor: '#25D366',
     borderRadius: 16,
     padding: 6,
     borderWidth: 2,
-    borderColor: '#1b1b1b',
-    shadowColor: '#ff3d3d',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 4,
+    borderColor: '#050505',
   },
   storyText: {
     color: '#fff',
     fontSize: 13,
-    marginTop: 8,
+    marginTop: 10,
     fontWeight: '700',
     maxWidth: 110,
     textAlign: 'center',
   },
   smallText: {
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(255,255,255,0.5)',
     fontSize: 11,
     marginTop: 2,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  metaDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#25D366',
+    marginRight: 6,
+  },
+  metaText: {
+    color: 'rgba(255,255,255,0.45)',
+    fontSize: 11,
   },
 });

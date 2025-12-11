@@ -10,6 +10,7 @@ export interface Media {
   backdrop_path?: string; // Add this
   overview?: string;      // Add this
   media_type?: 'movie' | 'tv';
+  imdb_id?: string | null;
 }
 
 export interface Genre {

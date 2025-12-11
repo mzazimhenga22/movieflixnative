@@ -1,20 +1,116 @@
-import React from 'react';
-import { View, Text, FlatList, StyleSheet, Image, SafeAreaView, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, FlatList, StyleSheet, Image, SafeAreaView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { collection, doc, getDoc, getDocs, orderBy, query, updateDoc, where, increment } from 'firebase/firestore';
+import { firestore } from '../../constants/firebase';
 import { findOrCreateConversation, findUserByUsername } from '../messaging/controller';
 
-const POSTS = Array.from({ length: 20 }, (_, i) => ({
-  id: i.toString(),
-  username: `user${i}`,
-  avatar: `https://i.pravatar.cc/150?u=user${i}`,
-  image: `https://picsum.photos/id/${i + 10}/400/400`,
-  caption: `This is post number ${i + 1}`,
-}));
+type FeedPost = {
+  id: string;
+  userId: string;
+  image?: string | null;
+  caption: string;
+  likes: number;
+  commentsCount: number;
+  liked: boolean;
+};
+
+type FeedAuthor = {
+  id: string;
+  displayName?: string;
+  username?: string;
+  avatar?: string | null;
+};
+
+type PostReactions = {
+  emoji: string | null;
+};
+
+const EMOJIS = ["??", "??", "??", "??", "??"];
 
 const FeedScreen = () => {
   const { username } = useLocalSearchParams();
   const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [posts, setPosts] = useState<FeedPost[]>([]);
+  const [author, setAuthor] = useState<FeedAuthor | null>(null);
+  const [reactions, setReactions] = useState<Record<string, PostReactions>>({});
+
+  const userId = typeof username === 'string' ? username : Array.isArray(username) ? username[0] : undefined;
+
+  useEffect(() => {
+    const loadAuthorAndPosts = async () => {
+      if (!userId) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        // load profile for header + avatar
+        try {
+          const userDocRef = doc(firestore, 'users', userId);
+          const snap = await getDoc(userDocRef);
+          if (snap.exists()) {
+            const data = snap.data() as any;
+            setAuthor({
+              id: userId,
+              displayName: data.displayName || data.name || undefined,
+              username: data.username || data.handle || undefined,
+              avatar: data.photoURL || data.avatar || null,
+            });
+          } else {
+            setAuthor({
+              id: userId,
+            });
+          }
+        } catch (e) {
+          console.warn('Failed to load feed author profile', e);
+        }
+
+        const reviewsRef = collection(firestore, 'reviews');
+        const q = query(
+          reviewsRef,
+          where('userId', '==', userId),
+          orderBy('createdAt', 'desc')
+        );
+        const snapshot = await getDocs(q);
+
+        const items: FeedPost[] = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as any;
+          return {
+            id: docSnap.id,
+            userId,
+            image: data.type === 'video' ? null : data.mediaUrl || null,
+            caption: data.review || data.title || '',
+            likes: data.likes ?? 0,
+            commentsCount: data.commentsCount ?? 0,
+            liked: false,
+          };
+        });
+
+        setPosts(items);
+      } catch (err) {
+        console.warn('Failed to load feed posts', err);
+        setPosts([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadAuthorAndPosts();
+  }, [userId]);
+
+    const handleSelectEmoji = (postId: string, emoji: string) => {
+    setReactions(prev => {
+      const current = prev[postId] ?? { liked: false, emoji: null };
+      const isSameEmoji = current.emoji === emoji;
+      return {
+        ...prev,
+        [postId]: { ...current, emoji: isSameEmoji ? null : emoji },
+      };
+    });
+  };
 
   const handleMessagePress = async (postUsername: string) => {
     const user = await findUserByUsername(postUsername);
@@ -24,31 +120,161 @@ const FeedScreen = () => {
     }
   };
 
+  const handleToggleLike = async (postId: string) => {
+    setPosts((prev) =>
+      prev.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              liked: !post.liked,
+              likes: post.likes + (post.liked ? -1 : 1),
+            }
+          : post
+      )
+    );
+
+    try {
+      const reviewRef = doc(firestore, 'reviews', postId);
+      const current = posts.find((p) => p.id === postId);
+      const goingToLike = current ? !current.liked : true;
+      await updateDoc(reviewRef, {
+        likes: increment(goingToLike ? 1 : -1),
+      });
+    } catch (err) {
+      console.warn('Failed to update like count', err);
+    }
+  };
+
+  const handleAddComment = async (postId: string) => {
+    setPosts((prev) =>
+      prev.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              commentsCount: post.commentsCount + 1,
+            }
+          : post
+      )
+    );
+
+    try {
+      const reviewRef = doc(firestore, 'reviews', postId);
+      await updateDoc(reviewRef, {
+        commentsCount: increment(1),
+      });
+    } catch (err) {
+      console.warn('Failed to update comments count', err);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{`${username}'s Feed`}</Text>
+        <Text style={styles.headerTitle}>
+          {author?.displayName || author?.username || userId || 'Feed'}
+          {"'s Feed"}
+        </Text>
       </View>
+      {loading ? (
+        <View style={styles.loaderWrapper}>
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        </View>
+      ) : (
       <FlatList
-        data={POSTS}
-        renderItem={({ item }) => (
-          <View style={styles.postContainer}>
-            <View style={styles.postHeader}>
-              <Image source={{ uri: item.avatar }} style={styles.avatar} />
-              <Text style={styles.username}>{item.username}</Text>
-              <TouchableOpacity style={styles.messageButton} onPress={() => handleMessagePress(item.username)}>
-                <Ionicons name="chatbubble-ellipses-outline" size={24} color="#FFFFFF" />
-              </TouchableOpacity>
+        data={posts}
+        renderItem={({ item }) => {
+          const postReactions = reactions[item.id] ?? { liked: false, emoji: null };
+
+          return (
+            <View style={styles.postContainer}>
+              <View style={styles.postHeader}>
+                {author?.avatar ? (
+                  <Image source={{ uri: author.avatar }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarFallback]}>
+                    <Text style={styles.avatarFallbackText}>
+                      {(author?.displayName || author?.username || 'U').charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.userInfo}>
+                  <Text style={styles.username}>
+                    {author?.displayName || author?.username || 'User'}
+                  </Text>
+                  {postReactions.emoji && (
+                    <Text style={styles.subTitle}>reacted {postReactions.emoji}</Text>
+                  )}
+                </View>
+                <TouchableOpacity
+                  style={styles.messageButton}
+                  onPress={() => handleMessagePress(author?.username || author?.displayName || 'user')}
+                >
+                  <Ionicons name="chatbubble-ellipses-outline" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+              {item.image ? (
+                <Image source={{ uri: item.image }} style={styles.postImage} />
+              ) : null}
+              <Text style={styles.caption}>{item.caption}</Text>
+
+              <View style={styles.actionsRow}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleToggleLike(item.id)}
+                >
+                  <Ionicons
+                    name={item.liked ? 'heart' : 'heart-outline'}
+                    size={22}
+                    color={item.liked ? '#FF4B6E' : '#FFFFFF'}
+                  />
+                  <Text style={styles.actionText}>
+                    {item.likes > 0 ? `${item.likes} like${item.likes === 1 ? '' : 's'}` : 'Like'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleAddComment(item.id)}
+                >
+                  <Ionicons name="chatbubble-outline" size={22} color="#FFFFFF" />
+                  <Text style={styles.actionText}>
+                    {item.commentsCount > 0
+                      ? `${item.commentsCount} comment${item.commentsCount === 1 ? '' : 's'}`
+                      : 'Comment'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.actionButton}>
+                  <Ionicons name="paper-plane-outline" size={22} color="#FFFFFF" />
+                  <Text style={styles.actionText}>Share</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.emojiRow}>
+                {EMOJIS.map(emoji => {
+                  const isActive = postReactions.emoji === emoji;
+                  return (
+                    <TouchableOpacity
+                      key={emoji}
+                      style={[styles.emojiButton, isActive && styles.emojiButtonActive]}
+                      onPress={() => handleSelectEmoji(item.id, emoji)}
+                    >
+                      <Text style={[styles.emojiText, isActive && styles.emojiTextActive]}>
+                        {emoji}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
             </View>
-            <Image source={{ uri: item.image }} style={styles.postImage} />
-            <Text style={styles.caption}>{item.caption}</Text>
-          </View>
-        )}
+          );
+        }}
         keyExtractor={item => item.id}
       />
+      )}
     </SafeAreaView>
   );
 };
@@ -86,16 +312,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 10,
   },
+  userInfo: {
+    flex: 1,
+  },
   avatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
     marginRight: 10,
   },
+  avatarFallback: {
+    backgroundColor: '#2A2A2A',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatarFallbackText: {
+    color: '#FFFFFF',
+    fontWeight: 'bold',
+  },
   username: {
     color: '#FFFFFF',
     fontWeight: 'bold',
-    flex: 1,
+    marginBottom: 2,
+  },
+  subTitle: {
+    color: '#8E8E8E',
+    fontSize: 12,
   },
   messageButton: {
     padding: 5,
@@ -108,6 +350,52 @@ const styles = StyleSheet.create({
     color: '#B3B3B3',
     padding: 10,
   },
+  loaderWrapper: {
+    paddingVertical: 24,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    paddingBottom: 8,
+    paddingTop: 4,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  actionText: {
+    color: '#E0E0E0',
+    fontSize: 13,
+  },
+  emojiRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  emojiButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#262626',
+  },
+  emojiButtonActive: {
+    backgroundColor: '#FF4B6E20',
+    borderWidth: 1,
+    borderColor: '#FF4B6E',
+  },
+  emojiText: {
+    fontSize: 16,
+  },
+  emojiTextActive: {
+    fontSize: 18,
+  },
 });
 
 export default FeedScreen;
+
+

@@ -1,7 +1,7 @@
 // app/profile.tsx (or wherever your ProfileScreen file lives)
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useState, useEffect } from 'react';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Image,
   ScrollView,
@@ -15,9 +15,10 @@ import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import ScreenWrapper from '../components/ScreenWrapper';
 import { authPromise, firestore } from '../constants/firebase';
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, getDocs, where } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { getAccentFromPosterPath } from '../constants/theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const ProfileScreen: React.FC = () => {
   const router = useRouter();
@@ -33,6 +34,8 @@ const ProfileScreen: React.FC = () => {
   const [followingCount, setFollowingCount] = useState(0);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [followBusy, setFollowBusy] = useState(false);
+  const [reviewsCount, setReviewsCount] = useState(0);
+  const [activeProfilePhoto, setActiveProfilePhoto] = useState<string | null>(null);
 
   // Determine which user to display: explicit param overrides current user
   const userIdToDisplay = profileUserId || currentUser?.uid;
@@ -61,6 +64,41 @@ const ProfileScreen: React.FC = () => {
       if (unsub) unsub();
     };
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+
+      const syncActiveProfile = async () => {
+        try {
+          const stored = await AsyncStorage.getItem('activeProfile');
+          if (!isMounted) return;
+
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            const photo =
+              typeof parsed?.photoURL === 'string' && parsed.photoURL.trim().length > 0
+                ? parsed.photoURL
+                : null;
+            setActiveProfilePhoto(photo);
+          } else {
+            setActiveProfilePhoto(null);
+          }
+        } catch (err) {
+          console.error('[profile] failed to load active profile avatar', err);
+          if (isMounted) {
+            setActiveProfilePhoto(null);
+          }
+        }
+      };
+
+      syncActiveProfile();
+
+      return () => {
+        isMounted = false;
+      };
+    }, [])
+  );
 
   useEffect(() => {
     // Fetch profile whenever the displayed user id changes
@@ -111,6 +149,20 @@ const ProfileScreen: React.FC = () => {
           setFollowersCount(0);
           setFollowingCount(0);
           setIsFollowing(false);
+        }
+
+        // Fetch simple review stats
+        try {
+          const reviewsRef = collection(firestore, 'reviews');
+          const q = where('userId', '==', userIdToDisplay as string);
+          const snapshot = await getDocs(reviewsRef.withConverter<any>({
+            toFirestore: (data) => data,
+            fromFirestore: (snap) => snap.data(),
+          }).where('userId', '==', userIdToDisplay as string));
+          setReviewsCount(snapshot.size);
+        } catch (err) {
+          console.warn('Failed to fetch review stats for profile', err);
+          setReviewsCount(0);
         }
       } catch (err) {
         console.error('Failed to fetch user profile:', err);
@@ -216,6 +268,7 @@ const ProfileScreen: React.FC = () => {
     try {
       const auth = await authPromise;
       await auth.signOut();
+      await AsyncStorage.removeItem('activeProfile');
       router.replace('/(auth)/login'); // redirect to login or root
     } catch (err) {
       console.error('Sign out failed:', err);
@@ -229,6 +282,10 @@ const ProfileScreen: React.FC = () => {
     router.push('/edit-profile');
   };
 
+  const handleSwitchProfile = () => {
+    router.push('/select-profile');
+  };
+
   const handleSettings = () => {
     router.push('/settings');
   };
@@ -237,6 +294,10 @@ const ProfileScreen: React.FC = () => {
   const accentColor = getAccentFromPosterPath(
     userProfile?.favoriteColor || (favoriteGenres[0] as string | undefined)
   );
+  const fallbackAvatar =
+    'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&q=80&w=1780&ixlib=rb-4.0.3';
+  const avatarUri =
+    (isOwnProfile ? activeProfilePhoto : null) || userProfile?.photoURL || fallbackAvatar;
 
   return (
     <View style={[styles.rootContainer, cameFromSocial && { backgroundColor: '#05060f' }]}>
@@ -266,21 +327,19 @@ const ProfileScreen: React.FC = () => {
                 end={{ x: 1, y: 1 }}
                 style={styles.headerSheen}
               />
-              <Image
-                source={{
-                  uri:
-                    userProfile?.photoURL ||
-                    'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&q=80&w=1780&ixlib=rb-4.0.3',
-                }}
-                style={styles.avatar}
-              />
+              <Image source={{ uri: avatarUri }} style={styles.avatar} />
               <Text style={styles.name}>{userProfile?.displayName || 'No-Name'}</Text>
               <Text style={styles.memberSince}>Member since 2023</Text>
 
               {isOwnProfile ? (
-                <TouchableOpacity style={styles.editProfileButton} onPress={handleEditProfile}>
-                  <Text style={styles.editProfileButtonText}>Edit Profile</Text>
-                </TouchableOpacity>
+                <View style={styles.selfActionRow}>
+                  <TouchableOpacity style={styles.editProfileButton} onPress={handleEditProfile}>
+                    <Text style={styles.editProfileButtonText}>Edit Profile</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.switchProfileButton} onPress={handleSwitchProfile}>
+                    <Text style={styles.switchProfileButtonText}>Switch Profile</Text>
+                  </TouchableOpacity>
+                </View>
               ) : (
                 <TouchableOpacity
                   style={[
@@ -305,8 +364,8 @@ const ProfileScreen: React.FC = () => {
                 <Text style={styles.statLabel}>Following</Text>
               </View>
               <View style={styles.statBox}>
-                <Text style={styles.statValue}>12</Text>
-                <Text style={styles.statLabel}>Watchlists</Text>
+                <Text style={styles.statValue}>{reviewsCount}</Text>
+                <Text style={styles.statLabel}>Reviews</Text>
               </View>
             </View>
 
@@ -421,6 +480,22 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.14)',
   },
   editProfileButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  selfActionRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  switchProfileButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  switchProfileButtonText: {
     color: 'white',
     fontWeight: 'bold',
   },

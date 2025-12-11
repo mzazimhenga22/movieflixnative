@@ -9,10 +9,23 @@ interface ChatHeaderProps {
   recipient: Profile | null;
   conversation?: Conversation | null;
   isTyping?: boolean;
+  streakCount?: number;
   onEditGroup?: () => void;
+  onStartVoiceCall?: () => void;
+  onStartVideoCall?: () => void;
+  callDisabled?: boolean;
 }
 
-const ChatHeader = ({ recipient, conversation, isTyping, onEditGroup }: ChatHeaderProps) => {
+const ChatHeader = ({
+  recipient,
+  conversation,
+  isTyping,
+  streakCount,
+  onEditGroup,
+  onStartVoiceCall,
+  onStartVideoCall,
+  callDisabled,
+}: ChatHeaderProps) => {
   const router = useRouter();
 
   const handleProfilePress = () => {
@@ -65,7 +78,9 @@ const ChatHeader = ({ recipient, conversation, isTyping, onEditGroup }: ChatHead
                 ? `${conversation.members?.length || 0} members`
                 : isTyping
                   ? 'Typing…'
-                  : recipient?.status ?? 'Online'}
+                  : typeof streakCount === 'number' && streakCount > 0
+                    ? `🔥 ${streakCount} day streak`
+                    : recipient?.status ?? 'Online'}
             </Text>
           </View>
 
@@ -79,10 +94,20 @@ const ChatHeader = ({ recipient, conversation, isTyping, onEditGroup }: ChatHead
                 <Ionicons name="settings-outline" size={18} color="white" />
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.actionButton} accessibilityLabel="Call">
+            <TouchableOpacity
+              style={[styles.actionButton, callDisabled && styles.actionButtonDisabled]}
+              accessibilityLabel="Call"
+              onPress={onStartVoiceCall}
+              disabled={callDisabled}
+            >
               <Ionicons name="call" size={18} color="white" />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} accessibilityLabel="Video call">
+            <TouchableOpacity
+              style={[styles.actionButton, callDisabled && styles.actionButtonDisabled]}
+              accessibilityLabel="Video call"
+              onPress={onStartVideoCall}
+              disabled={callDisabled}
+            >
               <Ionicons name="videocam" size={20} color="white" />
             </TouchableOpacity>
           </View>
@@ -166,6 +191,10 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     padding: 6,
     borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  actionButtonDisabled: {
+    opacity: 0.4,
   },
 });
 

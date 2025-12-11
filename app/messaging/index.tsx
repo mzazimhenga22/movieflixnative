@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo, useEffect } from 'react';
+import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,8 +9,9 @@ import {
   Platform,
   ActivityIndicator,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import ScreenWrapper from '../../components/ScreenWrapper';
@@ -20,6 +21,7 @@ import StoryItem from './components/StoryItem';
 import NoMessages from './components/NoMessages';
 import FAB from './components/FAB';
 import NewChatSheet from './components/NewChatSheet';
+import IncomingCallCard from './components/IncomingCallCard';
 import {
   onConversationsUpdate,
   getFollowing,
@@ -34,37 +36,64 @@ import {
 } from './controller';
 import { onStoriesUpdate } from '../components/social-feed/storiesController';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getAccentFromPosterPath } from '../../constants/theme';
 import { BlurView } from 'expo-blur';
 import MovieList from '../../components/MovieList';
 import { Media } from '../../types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { updateStreakForContext } from '@/lib/streaks/streakManager';
+import { getProfileScopedKey } from '@/lib/profileStorage';
+import { createCallSession, declineCall } from '@/lib/calls/callService';
+import type { CallType } from '@/lib/calls/types';
+import useIncomingCall from '@/hooks/useIncomingCall';
+import type { User } from 'firebase/auth';
 
 const HEADER_HEIGHT = 150;
 
+type ConversationListItem = Conversation & { unread: number };
+type Story = {
+  id: string;
+  userId: string;
+  username?: string;
+  avatar?: string;      // <- match StoryLike (string | undefined), no null
+  mediaUrl?: string;
+};
+
 const MessagingScreen = () => {
   const router = useRouter();
+  const { streakUserId, startStreaksWithFollowing } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
   const headerOpacity = useRef(new Animated.Value(1)).current;
   const promoTranslateX = useRef(new Animated.Value(40)).current;
 
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setAuthReady] = useState(false);
-  const [stories, setStories] = useState<any[]>([]);
+  const [stories, setStories] = useState<Story[]>([]);
   const [following, setFollowing] = useState<Profile[]>([]);
-  const [conversations, setConversations] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSheetVisible, setSheetVisible] = useState(false);
   const [activeFilter, setActiveFilter] = useState<'All' | 'Unread'>('All');
-  const [spotlightConversation, setSpotlightConversation] = useState<Conversation | null>(null);
-  const [spotlightRect, setSpotlightRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [spotlightConversation, setSpotlightConversation] = useState<ConversationListItem | null>(
+    null
+  );
+  const [spotlightRect, setSpotlightRect] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const [activeKind, setActiveKind] = useState<'Chats' | 'Groups'>('Chats');
   const [showPromoRow, setShowPromoRow] = useState(false);
   const [continueWatching, setContinueWatching] = useState<Media[]>([]);
+  const [didNavigateFromStreak, setDidNavigateFromStreak] = useState(false);
+  const [didBootstrapFollowingStreaks, setDidBootstrapFollowingStreaks] = useState(false);
+  const [isStartingCall, setIsStartingCall] = useState(false);
+  const incomingCall = useIncomingCall(user?.uid);
 
   useEffect(() => {
-    const unsubscribeAuth = onAuthChange(currentUser => {
+    const unsubscribeAuth = onAuthChange((currentUser) => {
+      // currentUser is User | null (from controller/firebase)
       setUser(currentUser);
       setAuthReady(true);
     });
@@ -72,34 +101,102 @@ const MessagingScreen = () => {
   }, []);
 
   useEffect(() => {
-    if (isAuthReady) {
-      const unsubscribeConversations = onConversationsUpdate(setConversations);
-      const unsubscribeStories = onStoriesUpdate(setStories);
-      getFollowing().then(setFollowing);
-      return () => {
-        unsubscribeConversations();
-        unsubscribeStories();
-      };
-    }
-  }, [isAuthReady]);
+    if (!isAuthReady || !user?.uid) return;
+    const unsubscribeConversations = onConversationsUpdate(setConversations);
+    const unsubscribeStories = onStoriesUpdate(setStories);
+    getFollowing().then(setFollowing);
+    return () => {
+      unsubscribeConversations();
+      unsubscribeStories();
+    };
+  }, [isAuthReady, user?.uid]);
 
   useEffect(() => {
-    const loadHistory = async () => {
+    if (!isAuthReady || !streakUserId || didNavigateFromStreak) return;
+
+    const navigateFromStreak = async () => {
       try {
-        const stored = await AsyncStorage.getItem('watchHistory');
-        if (stored) {
-          const parsed: Media[] = JSON.parse(stored);
-          setContinueWatching(parsed);
+        const { getProfileById } = await import('./controller');
+        const profile = await getProfileById(String(streakUserId));
+        if (!profile) {
+          return;
         }
+        const conversationId = await findOrCreateConversation(profile);
+        setDidNavigateFromStreak(true);
+        router.push({
+          pathname: '/messaging/chat/[id]',
+          params: { id: conversationId, fromStreak: '1' },
+        });
       } catch (err) {
-        console.error('Failed to load watch history for messaging', err);
+        console.error('Failed to navigate from streak', err);
       }
     };
 
-    if (isAuthReady) {
-      loadHistory();
-    }
-  }, [isAuthReady]);
+    void navigateFromStreak();
+  }, [isAuthReady, streakUserId, didNavigateFromStreak, router]);
+
+  useEffect(() => {
+    const flag = String(startStreaksWithFollowing || '');
+    if (!isAuthReady || flag !== '1' || didBootstrapFollowingStreaks) return;
+    if (!following || following.length === 0) return;
+
+    const bootstrap = async () => {
+      try {
+        for (const person of following) {
+          try {
+            const conversationId = await findOrCreateConversation(person);
+            await updateStreakForContext({
+              kind: 'chat',
+              conversationId,
+              partnerId: person.id,
+              partnerName: person.displayName ?? null,
+            });
+          } catch (err) {
+            console.error('Failed to start streak with', person.id, err);
+          }
+        }
+      } finally {
+        setDidBootstrapFollowingStreaks(true);
+      }
+    };
+
+    void bootstrap();
+  }, [isAuthReady, startStreaksWithFollowing, didBootstrapFollowingStreaks, following]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const loadHistory = async () => {
+        try {
+          const key = await getProfileScopedKey('watchHistory');
+          const stored = await AsyncStorage.getItem(key);
+          if (!isActive) return;
+          if (stored) {
+            const parsed: Media[] = JSON.parse(stored);
+            setContinueWatching(parsed);
+          } else {
+            setContinueWatching([]);
+          }
+        } catch (err) {
+          if (isActive) {
+            console.error('Failed to load watch history for messaging', err);
+            setContinueWatching([]);
+          }
+        }
+      };
+
+      if (isAuthReady) {
+        loadHistory();
+      } else {
+        setContinueWatching([]);
+      }
+
+      return () => {
+        isActive = false;
+      };
+    }, [isAuthReady])
+  );
 
   // After some time on screen, fade header and show a subtle promo row
   useEffect(() => {
@@ -123,51 +220,64 @@ const MessagingScreen = () => {
     return () => clearTimeout(timer);
   }, [isAuthReady, headerOpacity, promoTranslateX]);
 
-  const enhancedConversations: Conversation[] = useMemo(() => {
-    return conversations.map((c: any) => {
-      const isUnread = c.lastMessage && c.lastMessageSenderId && user && c.lastMessageSenderId !== user.uid;
+  const enhancedConversations: ConversationListItem[] = useMemo(() => {
+    return conversations.map((c) => {
+      const isUnread =
+        Boolean(c.lastMessage) &&
+        Boolean(c.lastMessageSenderId) &&
+        user?.uid &&
+        c.lastMessageSenderId !== user.uid;
       return {
         ...c,
         unread: isUnread ? 1 : 0,
       };
     });
-  }, [conversations, user]);
+  }, [conversations, user?.uid]);
 
   const filteredMessages = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    let base: Conversation[] = enhancedConversations;
+    let base: ConversationListItem[] = enhancedConversations;
 
     // Index between chats vs groups
     base =
       activeKind === 'Groups'
-        ? base.filter((m: any) => m.isGroup)
-        : base.filter((m: any) => !m.isGroup);
+        ? base.filter((m) => m.isGroup)
+        : base.filter((m) => !m.isGroup);
 
     if (activeFilter === 'Unread') {
-      base = base.filter((m: any) => m.unread && m.unread > 0);
+      base = base.filter((m) => m.unread > 0);
     }
     if (q) {
       base = base.filter(
-      (m) =>
-        (m.name && m.name.toLowerCase().includes(q)) ||
-        (m.lastMessage && m.lastMessage.toLowerCase().includes(q))
-    );
+        (m) =>
+          (m.name && m.name.toLowerCase().includes(q)) ||
+          (m.lastMessage && m.lastMessage.toLowerCase().includes(q)),
+      );
     }
 
     // Ensure pinned conversations are surfaced below the header
-    const pinned = base.filter((m: any) => m.pinned);
-    const others = base.filter((m: any) => !m.pinned);
+    const pinned = base.filter((m) => m.pinned);
+    const others = base.filter((m) => !m.pinned);
     return [...pinned, ...others];
   }, [enhancedConversations, searchQuery, activeFilter, activeKind]);
 
   const handleMessagePress = (id: string) => {
-    router.push(`/messaging/chat/${id}`);
+    router.push({
+      pathname: '/messaging/chat/[id]',
+      params: { id },
+    });
   };
 
-  const handleMessageLongPress = (conversation: Conversation, rect: { x: number; y: number; width: number; height: number }) => {
-    setSpotlightConversation(conversation);
-    setSpotlightRect(rect);
-  };
+  const handleMessageLongPress = useCallback(
+    (conversation: Conversation, rect: { x: number; y: number; width: number; height: number }) => {
+      const enriched =
+        enhancedConversations.find((c) => c.id === conversation.id) ??
+        ({ ...conversation, unread: 0 } as ConversationListItem);
+      setSpotlightConversation(enriched);
+      setSpotlightRect(rect);
+    },
+    [enhancedConversations],
+  );
 
   const handleCloseSpotlight = () => {
     setSpotlightConversation(null);
@@ -178,9 +288,12 @@ const MessagingScreen = () => {
     try {
       const conversationId = await findOrCreateConversation(person);
       setSheetVisible(false);
-      router.push(`/messaging/chat/${conversationId}`);
+      router.push({
+        pathname: '/messaging/chat/[id]',
+        params: { id: conversationId },
+      });
     } catch (error) {
-      console.error("Error starting chat: ", error);
+      console.error('Error starting chat: ', error);
     }
   };
 
@@ -189,7 +302,10 @@ const MessagingScreen = () => {
       const memberIds = members.map((m) => m.id);
       const conversationId = await createGroupConversation({ name, memberIds });
       setSheetVisible(false);
-      router.push(`/messaging/chat/${conversationId}`);
+      router.push({
+        pathname: '/messaging/chat/[id]',
+        params: { id: conversationId },
+      });
     } catch (error) {
       console.error('Error creating group chat: ', error);
     }
@@ -198,6 +314,58 @@ const MessagingScreen = () => {
   const navigateTo = (path: any) => {
     router.push(path);
   };
+
+  const handleStartCall = useCallback(
+    async (conversation: Conversation, mode: CallType) => {
+      if (!user?.uid) {
+        Alert.alert('Call unavailable', 'Sign in to place a call.');
+        return;
+      }
+      const memberIds = Array.isArray(conversation.members) ? conversation.members : [];
+      if (!conversation?.id || memberIds.length === 0) {
+        Alert.alert('Call unavailable', 'Conversation has no members yet.');
+        return;
+      }
+      if (isStartingCall) return;
+      setIsStartingCall(true);
+      const meta = (conversation as Record<string, any>) || {};
+      const conversationLabel = conversation.isGroup
+        ? conversation.name || meta.title || 'Group'
+        : meta.displayName || meta.title || 'Chat';
+      try {
+        const result = await createCallSession({
+          conversationId: conversation.id,
+          members: memberIds,
+          type: mode,
+          initiatorId: user.uid,
+          isGroup: !!conversation.isGroup,
+          conversationName: conversationLabel,
+          initiatorName: user.displayName ?? null,
+        });
+        router.push({ pathname: '/calls/[id]', params: { id: result.callId } });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Please try again later.';
+        Alert.alert('Unable to start call', message);
+      } finally {
+        setIsStartingCall(false);
+      }
+    },
+    [user?.uid, user?.displayName, router, isStartingCall],
+  );
+
+  const handleAcceptIncomingCall = useCallback(() => {
+    if (!incomingCall?.id) return;
+    router.push({ pathname: '/calls/[id]', params: { id: incomingCall.id } });
+  }, [incomingCall?.id, router]);
+
+  const handleDeclineIncomingCall = useCallback(async () => {
+    if (!incomingCall?.id || !user?.uid) return;
+    try {
+      await declineCall(incomingCall.id, user.uid, user.displayName ?? null);
+    } catch (err) {
+      console.warn('Failed to decline call', err);
+    }
+  }, [incomingCall?.id, user?.uid, user?.displayName]);
 
   const openSheet = () => {
     setSheetVisible(true);
@@ -245,11 +413,11 @@ const MessagingScreen = () => {
             />
           </Animated.View>
 
-          {showPromoRow && continueWatching.length > 0 && (
-            <Animated.View
-              style={[
-                styles.promoRow,
-                {
+        {showPromoRow && continueWatching.length > 0 && (
+          <Animated.View
+            style={[
+              styles.promoRow,
+              {
                   left: 0,
                   right: 0,
                   top: 0,
@@ -257,13 +425,18 @@ const MessagingScreen = () => {
                 },
               ]}
             >
-              <MovieList
-                title="Continue Watching"
-                movies={continueWatching.slice(0, 20)}
-              />
-            </Animated.View>
-          )}
-        </View>
+            <MovieList title="Continue Watching" movies={continueWatching.slice(0, 20)} />
+          </Animated.View>
+        )}
+      </View>
+
+      {incomingCall && (
+        <IncomingCallCard
+          call={incomingCall}
+          onAccept={handleAcceptIncomingCall}
+          onDecline={handleDeclineIncomingCall}
+        />
+      )}
 
         {filteredMessages.length === 0 && searchQuery === '' ? (
           <NoMessages
@@ -279,10 +452,16 @@ const MessagingScreen = () => {
                 item={item}
                 onPress={() => handleMessagePress(item.id)}
                 currentUser={user}
-                onLongPress={(conv, rect) => handleMessageLongPress(conv as Conversation, rect)}
+                onLongPress={handleMessageLongPress}
+                onStartCall={handleStartCall}
+                callDisabled={isStartingCall}
               />
             )}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) =>
+              item.id
+                ? `${item.id}-${item.updatedAt ?? item.lastMessageAt ?? index}`
+                : `conversation-${index}`
+            }
             onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
               useNativeDriver: false,
             })}
@@ -313,7 +492,9 @@ const MessagingScreen = () => {
                         style={[styles.filterChip, isActive && styles.filterChipActive]}
                         onPress={() => setActiveFilter(label as 'All' | 'Unread')}
                       >
-                        <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>
+                        <Text
+                          style={[styles.filterChipText, isActive && styles.filterChipTextActive]}
+                        >
                           {label}
                         </Text>
                       </TouchableOpacity>
@@ -326,21 +507,23 @@ const MessagingScreen = () => {
                     <Text style={styles.storiesAction}>View all</Text>
                   </View>
 
-                    <FlatList
-                      data={stories}
-                      renderItem={({ item }) => (
-                        <StoryItem
-                          item={item}
-                          onPress={(story) =>
-                            router.push(
-                              `/story/${story.id}?photoURL=${encodeURIComponent(
-                                (story as any).photoURL ?? (story as any).avatar ?? ''
-                              )}`
-                            )
-                          }
-                        />
-                      )}
-                    keyExtractor={(item) => item.id}
+                  <FlatList
+                    data={stories}
+                    renderItem={({ item }) => (
+                      <StoryItem
+                        item={item}
+                        onPress={(story) =>
+                          router.push({
+                            pathname: '/story/[id]',
+                            params: {
+                              id: story.id,
+                              photoURL: story.avatar ?? '',
+                            },
+                          })
+                        }
+                      />
+                    )}
+                    keyExtractor={(item, index) => `${item.id}-${index}`}
                     horizontal
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.storiesListContent}
@@ -350,7 +533,8 @@ const MessagingScreen = () => {
             }
             contentContainerStyle={{
               paddingTop: headerHeight + 8,
-              paddingBottom: Platform.OS === 'ios' ? insets.bottom + 120 : insets.bottom + 100,
+              paddingBottom:
+                Platform.OS === 'ios' ? insets.bottom + 120 : insets.bottom + 100,
             }}
             showsVerticalScrollIndicator={false}
           />
@@ -379,6 +563,8 @@ const MessagingScreen = () => {
                   handleMessagePress(spotlightConversation.id);
                 }}
                 onLongPress={() => {}}
+                onStartCall={handleStartCall}
+                callDisabled={isStartingCall}
               />
             </View>
 

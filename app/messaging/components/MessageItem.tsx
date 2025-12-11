@@ -1,20 +1,37 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  GestureResponderEvent,
+} from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Conversation, Profile } from '../controller';
 import { doc, getDoc } from 'firebase/firestore';
 import { firestore } from '../../../constants/firebase';
 import { User } from 'firebase/auth';
 import { Ionicons } from '@expo/vector-icons';
+import type { CallType } from '@/lib/calls/types';
 
 interface MessageItemProps {
   item: Conversation;
   onPress: (id: string) => void;
   currentUser: User | null;
   onLongPress?: (item: Conversation, rect: { x: number; y: number; width: number; height: number }) => void;
+  onStartCall?: (conversation: Conversation, type: CallType) => void;
+  callDisabled?: boolean;
 }
  
-const MessageItem = ({ item, onPress, currentUser, onLongPress }: MessageItemProps) => {
+const MessageItem = ({
+  item,
+  onPress,
+  currentUser,
+  onLongPress,
+  onStartCall,
+  callDisabled,
+}: MessageItemProps) => {
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
   const rowRef = useRef<View | null>(null);
   const time = item.updatedAt?.toDate ? item.updatedAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -43,6 +60,15 @@ const MessageItem = ({ item, onPress, currentUser, onLongPress }: MessageItemPro
       onLongPress(item, { x, y, width, height });
     });
   };
+
+  const handleCallPress = useCallback(
+    (event: GestureResponderEvent, type: CallType) => {
+      event.stopPropagation();
+      if (callDisabled || !onStartCall) return;
+      onStartCall(item, type);
+    },
+    [callDisabled, onStartCall, item],
+  );
 
   return (
     <TouchableOpacity
@@ -96,6 +122,24 @@ const MessageItem = ({ item, onPress, currentUser, onLongPress }: MessageItemPro
             ) : null}
           </View>
         </View>
+        <View style={styles.trailingActions}>
+          <TouchableOpacity
+            style={[styles.callAction, callDisabled && styles.callActionDisabled]}
+            accessibilityLabel="Start voice call"
+            onPress={(event) => handleCallPress(event, 'voice')}
+            disabled={callDisabled}
+          >
+            <Ionicons name="call" size={16} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.callAction, callDisabled && styles.callActionDisabled]}
+            accessibilityLabel="Start video call"
+            onPress={(event) => handleCallPress(event, 'video')}
+            disabled={callDisabled}
+          >
+            <Ionicons name="videocam" size={18} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </BlurView>
     </TouchableOpacity>
   );
@@ -146,6 +190,23 @@ const styles = StyleSheet.create({
   },
   messageContent: {
     flex: 1,
+  },
+  trailingActions: {
+    marginLeft: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  callAction: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 4,
+  },
+  callActionDisabled: {
+    opacity: 0.4,
   },
   row: {
     flexDirection: 'row',

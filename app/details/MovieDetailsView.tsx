@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, ScrollView, Text } from 'react-native';
+import React from 'react';
+import { StyleSheet, View, ScrollView, Text, Alert } from 'react-native';
 import { Media, CastMember } from '../../types';
 import MovieHeader from './MovieHeader';
 import MovieInfo from './MovieInfo';
@@ -7,8 +7,7 @@ import TrailerList from './TrailerList';
 import RelatedMovies from './RelatedMovies';
 import EpisodeList from './EpisodeList';
 import CastList from './CastList';
-import { usePStream } from '../../src/pstream/usePStream';
-import { Video } from 'expo-av';
+import { usePStream, PStreamPlayback } from '../../src/pstream/usePStream';
 import { useRouter } from 'expo-router';
 
 interface VideoType {
@@ -44,92 +43,237 @@ const MovieDetailsView: React.FC<Props> = ({
   cast,
 }) => {
   const router = useRouter();
-  const { loading, error, result: pstreamPlayUrl, scrape } = usePStream();
-  const [currentPlayUrl, setCurrentPlayUrl] = useState<string | null>(null);
-  const [showPStreamPlayer, setShowPStreamPlayer] = useState(false);
+  const { loading, scrape } = usePStream();
 
-  useEffect(() => {
-    if (pstreamPlayUrl) {
-      setCurrentPlayUrl(pstreamPlayUrl);
-      setShowPStreamPlayer(true);
+  const buildUpcomingEpisodesPayload = () => {
+    if (mediaType !== 'tv' || !Array.isArray(seasons) || seasons.length === 0) {
+      return undefined;
     }
-  }, [pstreamPlayUrl]);
+    const upcoming: Array<{
+      id?: number;
+      title?: string;
+      seasonName?: string;
+      episodeNumber?: number;
+      overview?: string;
+      runtime?: number;
+      stillPath?: string | null;
+    }> = [];
 
-  const handlePlayMovie = async () => {
-    router.push('/video-player');
+    seasons.forEach((season, idx) => {
+      const seasonEpisodes = Array.isArray((season as any)?.episodes) ? (season as any).episodes : [];
+      const filtered = idx === 0 ? seasonEpisodes.filter((ep: any) => ep.episode_number > 1) : seasonEpisodes;
+      filtered.forEach((ep: any) => {
+        upcoming.push({
+          id: ep.id,
+          title: ep.name,
+          seasonName: season?.name ?? `Season ${idx + 1}`,
+          episodeNumber: ep.episode_number,
+          overview: ep.overview,
+          runtime: ep.runtime,
+          stillPath: ep.still_path,
+          seasonNumber: season?.season_number ?? idx + 1,
+          seasonTmdbId: season?.id,
+          episodeTmdbId: ep?.id,
+        });
+      });
+    });
+
+    if (!upcoming.length) return undefined;
+    return JSON.stringify(upcoming);
   };
 
-  const handleClosePlayer = () => {
-    setCurrentPlayUrl(null);
-    setShowPStreamPlayer(false);
+  const findInitialEpisode = () => {
+    if (mediaType !== 'tv' || !Array.isArray(seasons)) return null;
+    const sortedSeasons = seasons
+      .filter((season: any) => typeof season?.season_number === 'number' && season.season_number > 0)
+      .sort((a: any, b: any) => a.season_number - b.season_number);
+    for (const season of sortedSeasons) {
+      const episodes = Array.isArray(season?.episodes) ? season.episodes : [];
+      const sortedEpisodes = episodes
+        .filter((ep: any) => typeof ep?.episode_number === 'number')
+        .sort((a: any, b: any) => a.episode_number - b.episode_number);
+      if (sortedEpisodes.length > 0) {
+        return {
+          season,
+          episode: sortedEpisodes[0],
+        };
+      }
+    }
+    return null;
+  };
+
+  const computeReleaseYear = () => {
+    const raw = movie?.release_date || movie?.first_air_date;
+    if (!raw) return undefined;
+    const parsed = parseInt(raw.slice(0, 4), 10);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  };
+
+  const buildRouteParams = (targetMediaType: string) => {
+    const releaseYear = computeReleaseYear() ?? new Date().getFullYear();
+    const params: Record<string, string> = {
+      title: movie?.title || movie?.name || 'Now Playing',
+      mediaType: targetMediaType,
+      tmdbId: movie?.id?.toString() ?? '',
+      releaseYear: releaseYear.toString(),
+    };
+    if (movie?.imdb_id) {
+      params.imdbId = movie.imdb_id;
+    }
+    const upcomingEpisodesPayload = buildUpcomingEpisodesPayload();
+    if (upcomingEpisodesPayload) {
+      params.upcomingEpisodes = upcomingEpisodesPayload;
+    }
+    return { params, releaseYear };
+  };
+
+  const pushToVideoPlayer = (playback: PStreamPlayback, params: Record<string, string>) => {
+    const nextParams = { ...params };
+    nextParams.videoUrl = playback.uri;
+    if (playback.headers) {
+      nextParams.videoHeaders = encodeURIComponent(JSON.stringify(playback.headers));
+    }
+    if (playback.stream?.type) {
+      nextParams.streamType = playback.stream.type;
+    }
+
+    router.push({
+      pathname: '/video-player',
+      params: nextParams,
+    });
+  };
+
+  const handlePlayMovie = async () => {
+    if (!movie || loading) return;
+    const normalizedMediaType = typeof mediaType === 'string' ? mediaType : 'movie';
+    const { params, releaseYear } = buildRouteParams(normalizedMediaType);
+
+    try {
+      let playback: PStreamPlayback;
+      if (normalizedMediaType === 'tv') {
+        const initialEpisode = findInitialEpisode();
+        if (!initialEpisode) {
+          Alert.alert('Episodes loading', 'Please wait while we fetch the first episode details.');
+          return;
+        }
+        params.seasonNumber = initialEpisode.season.season_number?.toString() ?? '';
+        params.seasonTmdbId = initialEpisode.season.id?.toString() ?? '';
+        params.episodeNumber = initialEpisode.episode.episode_number?.toString() ?? '';
+        params.episodeTmdbId = initialEpisode.episode.id?.toString() ?? '';
+        playback = await scrape({
+          type: 'show',
+          title: movie?.name || movie?.title || 'TV Show',
+          tmdbId: movie.id?.toString() ?? '',
+          imdbId: movie.imdb_id ?? undefined,
+          releaseYear,
+          season: {
+            number: initialEpisode.season.season_number,
+            tmdbId: initialEpisode.season.id?.toString() ?? '',
+            title: initialEpisode.season.name ?? `Season ${initialEpisode.season.season_number}`,
+            episodeCount: initialEpisode.season.episodes?.length,
+          },
+          episode: {
+            number: initialEpisode.episode.episode_number,
+            tmdbId: initialEpisode.episode.id?.toString() ?? '',
+          },
+        });
+      } else {
+        playback = await scrape({
+          type: 'movie',
+          title: movie?.title || movie?.name || 'Movie',
+          tmdbId: movie.id?.toString() ?? '',
+          imdbId: movie.imdb_id ?? undefined,
+          releaseYear,
+        });
+      }
+
+      pushToVideoPlayer(playback, params);
+    } catch (err: any) {
+      Alert.alert('Playback unavailable', err?.message || 'No playable sources were found.');
+    }
+  };
+
+  const handlePlayEpisode = async (episode: any, season: any) => {
+    if (!movie || loading || !season) return;
+    const { params, releaseYear } = buildRouteParams('tv');
+    const seasonNumber = season?.season_number ?? episode?.season_number ?? 1;
+    const episodeNumber = episode?.episode_number ?? 1;
+
+    params.seasonNumber = seasonNumber.toString();
+    if (season?.id) params.seasonTmdbId = season.id.toString();
+    params.episodeNumber = episodeNumber.toString();
+    if (episode?.id) params.episodeTmdbId = episode.id.toString();
+
+    try {
+      const playback = await scrape({
+        type: 'show',
+        title: movie?.name || movie?.title || 'TV Show',
+        tmdbId: movie.id?.toString() ?? '',
+        imdbId: movie.imdb_id ?? undefined,
+        releaseYear,
+        season: {
+          number: seasonNumber,
+          tmdbId: season?.id?.toString() ?? '',
+          title: season?.name ?? `Season ${seasonNumber}`,
+          episodeCount: season?.episodes?.length,
+        },
+        episode: {
+          number: episodeNumber,
+          tmdbId: episode?.id?.toString() ?? '',
+        },
+      });
+
+      pushToVideoPlayer(playback, params);
+    } catch (err: any) {
+      Alert.alert('Episode unavailable', err?.message || 'Unable to load this episode.');
+    }
   };
 
   return (
     <View style={styles.fullContainer}>
-      {showPStreamPlayer && currentPlayUrl ? (
-        <View style={styles.videoPlayerContainer}>
-          <Video
-            style={styles.videoPlayer}
-            source={{ uri: currentPlayUrl }}
-            useNativeControls
-            resizeMode="contain"
-            shouldPlay
-          />
-          <MovieHeader
-            movie={movie}
+      <ScrollView contentContainerStyle={styles.scrollViewContent} showsVerticalScrollIndicator={false}>
+        <MovieHeader
+          movie={movie}
+          isLoading={isLoading}
+          onWatchTrailer={onWatchTrailer}
+          onBack={onBack}
+          onAddToMyList={() => movie && onAddToMyList(movie)}
+          onPlayMovie={handlePlayMovie}
+          isPStreamPlaying={false}
+          accentColor="#e50914"
+          isPlayLoading={loading}
+        />
+
+        <View style={[styles.section, styles.sectionFirst]}>
+          <MovieInfo movie={movie} isLoading={isLoading} />
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Trailers</Text>
+          <TrailerList trailers={trailers} isLoading={isLoading} onWatchTrailer={onWatchTrailer} />
+        </View>
+
+        {mediaType === 'tv' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Episodes</Text>
+            <EpisodeList seasons={seasons} onPlayEpisode={handlePlayEpisode} disabled={loading} />
+          </View>
+        )}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>More like this</Text>
+          <RelatedMovies
+            relatedMovies={relatedMovies}
             isLoading={isLoading}
-            onWatchTrailer={onWatchTrailer}
-            onBack={handleClosePlayer}
-            onAddToMyList={() => movie && onAddToMyList(movie)}
-            onPlayMovie={handlePlayMovie}
-            isPStreamPlaying
-            accentColor="#e50914"
+            onSelectRelated={onSelectRelated}
           />
         </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.scrollViewContent} showsVerticalScrollIndicator={false}>
-          <MovieHeader
-            movie={movie}
-            isLoading={isLoading}
-            onWatchTrailer={onWatchTrailer}
-            onBack={onBack}
-            onAddToMyList={() => movie && onAddToMyList(movie)}
-            onPlayMovie={handlePlayMovie}
-            isPStreamPlaying={false}
-            accentColor="#e50914"
-          />
 
-          <View style={[styles.section, styles.sectionFirst]}>
-            <MovieInfo movie={movie} isLoading={isLoading} />
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Trailers</Text>
-            <TrailerList trailers={trailers} isLoading={isLoading} onWatchTrailer={onWatchTrailer} />
-          </View>
-
-          {mediaType === 'tv' && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Episodes</Text>
-              <EpisodeList seasons={seasons} />
-            </View>
-          )}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>More like this</Text>
-            <RelatedMovies
-              relatedMovies={relatedMovies}
-              isLoading={isLoading}
-              onSelectRelated={onSelectRelated}
-            />
-          </View>
-
-          <View style={[styles.section, styles.lastSection]}>
-            <Text style={styles.sectionTitle}>Cast</Text>
-            <CastList cast={cast} />
-          </View>
-        </ScrollView>
-      )}
+        <View style={[styles.section, styles.lastSection]}>
+          <Text style={styles.sectionTitle}>Cast</Text>
+          <CastList cast={cast} />
+        </View>
+      </ScrollView>
     </View>
   );
 };
@@ -142,17 +286,6 @@ const styles = StyleSheet.create({
   scrollViewContent: {
     paddingBottom: 40,
     paddingTop: 0,
-  },
-  videoPlayerContainer: {
-    width: '100%',
-    flex: 1,
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  videoPlayer: {
-    width: '100%',
-    height: '100%',
   },
   section: {
     paddingHorizontal: 18,

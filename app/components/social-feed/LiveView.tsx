@@ -1,36 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import React from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-
-type LiveStream = {
-  id: string;
-  title: string;
-  hostName: string;
-  viewers: number;
-  thumbnailUrl: string;
-};
-
-// Mock data - replace with real data from your API
-const LIVE_STREAMS: LiveStream[] = [
-  {
-    id: '1',
-    title: 'Movie Night: Discussing Latest Releases',
-    hostName: 'MovieBuff',
-    viewers: 1234,
-    thumbnailUrl: 'https://example.com/thumbnail1.jpg',
-  },
-  {
-    id: '2',
-    title: 'Live Movie Review: Blockbuster Analysis',
-    hostName: 'CinematicCritic',
-    viewers: 856,
-    thumbnailUrl: 'https://example.com/thumbnail2.jpg',
-  },
-];
+import {
+  ActivityIndicator,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import useLiveStreams from '@/hooks/useLiveStreams';
 
 export default function LiveView() {
+  const router = useRouter();
+  const [liveStreams, loaded] = useLiveStreams();
+  const isLoading = !loaded;
+
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -40,7 +28,10 @@ export default function LiveView() {
       <ScrollView style={styles.content}>
         <View style={styles.header}>
           <Text style={styles.title}>Live Now</Text>
-          <TouchableOpacity style={styles.goLiveButton}>
+          <TouchableOpacity
+            style={styles.goLiveButton}
+            onPress={() => router.push('/social-feed/go-live')}
+          >
             <BlurView intensity={30} tint="dark" style={styles.goLiveBlur}>
               <Ionicons name="radio" size={20} color="#ff4b4b" />
               <Text style={styles.goLiveText}>Go Live</Text>
@@ -48,28 +39,51 @@ export default function LiveView() {
           </TouchableOpacity>
         </View>
 
-        {LIVE_STREAMS.map((stream) => (
-          <TouchableOpacity key={stream.id} style={styles.streamCard}>
+        {isLoading && (
+          <View style={styles.loadingState}>
+            <ActivityIndicator color="#ff4b4b" />
+            <Text style={styles.loadingText}>Checking who is live…</Text>
+          </View>
+        )}
+
+        {!isLoading && liveStreams.length === 0 && (
+          <View style={styles.emptyState}>
+            <Ionicons name="radio-outline" size={48} color="#ff4b4b" />
+            <Text style={styles.emptyTitle}>No live rooms yet</Text>
+            <Text style={styles.emptySubtitle}>Be the first to start the party.</Text>
+          </View>
+        )}
+
+        {liveStreams.map((stream) => {
+          const thumbnailSource = stream.coverUrl
+            ? { uri: stream.coverUrl }
+            : require('../../../assets/images/default-thumbnail.webp');
+          return (
+          <TouchableOpacity
+            key={stream.id}
+            style={styles.streamCard}
+            onPress={() => router.push(`/social-feed/live/${stream.id}`)}
+          >
             <View style={styles.thumbnailContainer}>
               <Image
-                source={{ uri: stream.thumbnailUrl }}
+                source={thumbnailSource}
                 style={styles.thumbnail}
-                defaultSource={require('../../../assets/images/default-thumbnail.webp')}
               />
               <BlurView intensity={60} tint="dark" style={styles.liveIndicator}>
                 <View style={styles.liveIndicatorDot} />
                 <Text style={styles.liveText}>LIVE</Text>
                 <Text style={styles.viewerCount}>
-                  <Ionicons name="eye" size={12} color="#fff" /> {stream.viewers}
+                  <Ionicons name="eye" size={12} color="#fff" /> {Math.max(stream.viewersCount, 0)}
                 </Text>
               </BlurView>
             </View>
             <BlurView intensity={30} tint="dark" style={styles.streamInfo}>
               <Text style={styles.streamTitle}>{stream.title}</Text>
-              <Text style={styles.hostName}>{stream.hostName}</Text>
+              <Text style={styles.hostName}>{stream.hostName ?? 'Unknown host'}</Text>
             </BlurView>
           </TouchableOpacity>
-        ))}
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -114,6 +128,27 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     borderRadius: 16,
     overflow: 'hidden',
+  },
+  loadingState: {
+    alignItems: 'center',
+    paddingVertical: 60,
+    gap: 12,
+  },
+  loadingText: {
+    color: 'rgba(255,255,255,0.7)',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 80,
+    gap: 12,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  emptySubtitle: {
+    color: 'rgba(255,255,255,0.6)',
   },
   thumbnailContainer: {
     position: 'relative',

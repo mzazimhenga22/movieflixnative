@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import React, { useRef, useState, useCallback } from 'react';
 import { Animated, RefreshControl, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import ScreenWrapper from '../../components/ScreenWrapper';
 import BottomNav from '../components/social-feed/BottomNav';
@@ -16,6 +17,7 @@ import FeedTabs from '../components/social-feed/Tabs';
 import { getAccentFromPosterPath } from '../../constants/theme';
 
 const SocialFeed = () => {
+  const router = useRouter();
   const { reviews, refreshReviews, handleLike, handleBookmark, handleComment, handleWatch, handleShare } =
     useSocialReactions();
   const [activeTab, setActiveTab] = useState<'Feed' | 'Recommended' | 'Live' | 'Movie Match'>('Feed');
@@ -106,6 +108,7 @@ const SocialFeed = () => {
                       onWatch={handleWatch}
                       onShare={handleShare}
                       onBookmark={handleBookmark}
+                      enableStreaks
                     />
                   );
                 })}
@@ -195,7 +198,7 @@ const SocialFeed = () => {
               <View style={[styles.ashParticle, { left: '45%', width: 5, height: 5, opacity: 0.8 }]} />
               <View style={[styles.ashParticle, { left: '75%', width: 7, height: 7, opacity: 0.5 }]} />
             </Animated.View>
-          <TouchableOpacity style={styles.fab}>
+          <TouchableOpacity style={styles.fab} onPress={() => router.push('/social-feed/go-live')}>
             <Ionicons name="add" size={28} color="#fff" />
           </TouchableOpacity>
         </View>

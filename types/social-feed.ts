@@ -2,7 +2,7 @@ import { ImageSourcePropType } from 'react-native';
 
 // Defines the shape of a single comment object
 export interface Comment {
-  id: number;
+  id: number | string;
   user: string;
   text: string;
   spoiler?: boolean;
@@ -11,8 +11,12 @@ export interface Comment {
 // This is now the single source of truth for a review item's shape,
 // matching the data provided by the useSocialReactions hook.
 export interface Review {
-  id: number;
+  id: number | string;
+  docId?: string;
+  origin?: 'firestore' | 'supabase' | 'mock';
+  userId?: string | null;
   user: string;
+  avatar?: string | null;
   date: string;
   review: string;
   movie?: string;

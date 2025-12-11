@@ -11,6 +11,7 @@ config.resolver = {
   unstable_enablePackageExports: true,
   extraNodeModules: {
     ...config.resolver?.extraNodeModules,
+    'form-data': path.resolve(__dirname, 'polyfills/form-data.js'),
     'react/compiler-runtime': path.resolve(__dirname, 'node_modules/react-compiler-runtime'),
   },
   /**

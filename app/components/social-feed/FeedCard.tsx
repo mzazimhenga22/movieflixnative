@@ -21,21 +21,23 @@ import {
 } from 'react-native';
 import MaskedView from '@react-native-masked-view/masked-view';
 import type { Comment, FeedCardItem } from '../../../types/social-feed';
+import { updateStreakForContext } from '@/lib/streaks/streakManager';
 
 type Props = {
   item: FeedCardItem;
-  onLike: (id: number) => void;
-  onComment: (id: number) => void;
-  onWatch: (id: number) => void;
-  onShare: (id: number) => void;
-  onBookmark: (id: number) => void;
+  onLike: (id: FeedCardItem['id']) => void;
+  onComment: (id: FeedCardItem['id'], text?: string) => void;
+  onWatch: (id: FeedCardItem['id']) => void;
+  onShare: (id: FeedCardItem['id']) => void;
+  onBookmark: (id: FeedCardItem['id']) => void;
+  enableStreaks?: boolean;
 };
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_MAX_HEIGHT = Math.round(SCREEN_HEIGHT * 0.72);
 const MEDIA_HEIGHT = Math.round(SCREEN_HEIGHT * 0.75);
 
-export default function FeedCard({ item, onLike, onComment, onWatch, onShare, onBookmark }: Props) {
+export default function FeedCard({ item, onLike, onComment, onWatch, onShare, onBookmark, enableStreaks }: Props) {
   const [commentsVisible, setCommentsVisible] = useState(false);
   const [watchVisible, setWatchVisible] = useState(false);
   const [newComment, setNewComment] = useState('');
@@ -45,6 +47,20 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
   const lastTapRef = useRef(0);
   const [heartPosition, setHeartPosition] = useState({ x: MEDIA_HEIGHT / 2, y: MEDIA_HEIGHT / 2 });
   const translateY = useRef(new Animated.Value(SHEET_MAX_HEIGHT)).current;
+  const userInitial = (item.user?.trim()?.charAt(0)?.toUpperCase() || 'W');
+
+  const AvatarBubble = ({ variant }: { variant: 'overlay' | 'default' }) => {
+    const baseStyle = variant === 'overlay' ? styles.avatarOverlay : styles.avatar;
+    if (item.avatar) {
+      return <Image source={{ uri: item.avatar }} style={[baseStyle, styles.avatarImage]} />;
+    }
+
+    return (
+      <View style={baseStyle}>
+        <Text style={styles.avatarInitial}>{userInitial}</Text>
+      </View>
+    );
+  };
 
   // 🔹 Video refs & state
   const videoRef = useRef<Video | null>(null);
@@ -69,15 +85,12 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
     }
   }, [commentsVisible, watchVisible, translateY]);
 
-  const openComments = useCallback(
-    (id: number) => {
-      try {
-        onComment(id);
-      } catch {}
-      setCommentsVisible(true);
-    },
-    [onComment]
-  );
+  const openComments = useCallback(() => {
+    setCommentsVisible(true);
+    if (enableStreaks) {
+      void updateStreakForContext({ kind: 'feed_comment' });
+    }
+  }, [enableStreaks]);
 
   const openWatch = useCallback(
     (id: number) => {
@@ -101,6 +114,9 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
   const handleDoubleTap = () => {
     onLike(item.id);
     triggerHeart();
+    if (enableStreaks) {
+      void updateStreakForContext({ kind: 'feed_like' });
+    }
   };
 
   const handleTap = (e: GestureResponderEvent) => {
@@ -130,7 +146,13 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
   };
 
   const submitComment = () => {
-    if (!newComment.trim()) return;
+    const trimmed = newComment.trim();
+    if (!trimmed) return;
+    try {
+      onComment(item.id, trimmed);
+    } catch (err) {
+      console.warn('Failed to submit comment', err);
+    }
     setNewComment('');
     Keyboard.dismiss();
   };
@@ -231,7 +253,7 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
           </Animated.View>
 
           <View style={styles.imageOverlay}>
-            <View style={styles.avatarOverlay} />
+            <AvatarBubble variant="overlay" />
             <View style={{ flex: 1, paddingLeft: 12 }}>
               <Text style={styles.userOverlay}>{item.user}</Text>
               <Text style={styles.reviewOverlay} numberOfLines={2}>
@@ -249,7 +271,7 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
       <View style={styles.content}>
         {!item.image && !item.videoUrl && (
           <View style={styles.headerRow}>
-            <View style={styles.avatar} />
+            <AvatarBubble variant="default" />
             <View>
               <Text style={styles.user}>{item.user}</Text>
               <Text style={styles.date}>{item.date}</Text>
@@ -308,7 +330,7 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
             <Text style={styles.actionText}>{item.likes}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionPill} onPress={() => openComments(item.id)}>
+          <TouchableOpacity style={styles.actionPill} onPress={openComments}>
             <Feather name="message-circle" size={18} color="#fff" />
             <Text style={styles.actionText}>{item.commentsCount}</Text>
           </TouchableOpacity>
@@ -474,6 +496,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#e50914',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   userOverlay: { color: '#fff', fontWeight: '700' },
   reviewOverlay: { color: '#f5f5f5', fontSize: 12, marginTop: 2 },
@@ -501,6 +526,19 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     backgroundColor: '#e50914',
     marginRight: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarInitial: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 999,
   },
   user: { color: '#fff', fontWeight: '700' },
   date: { color: '#999', fontSize: 11, marginTop: 2 },

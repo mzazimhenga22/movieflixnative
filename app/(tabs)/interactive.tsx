@@ -146,7 +146,7 @@ const ACCENT = '#e50914';
                   iconName="account-group"
                   title="Watch Party"
                   description="Host live watch parties with synchronized playback and in-app chat."
-                  onPress={() => router.push('/watch-party')}
+                  onPress={() => router.push('/watchparty')}
                 />
                 <FeatureCard
                   iconName="comment-question"

@@ -10,7 +10,7 @@ export default function SplashScreen() {
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
       // Decide initial route based on current auth session
-      const target = user ? '/(tabs)/movies' : '/(auth)/login';
+      const target = user ? '/select-profile' : '/(auth)/login';
       router.replace(target);
     });
 

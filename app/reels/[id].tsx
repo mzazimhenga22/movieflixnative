@@ -8,12 +8,12 @@ import {
   Dimensions,
   Alert,
   FlatList,
+  StatusBar,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import YoutubePlayer from 'react-native-youtube-iframe';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import ScreenWrapper from '../../components/ScreenWrapper';
 import { API_BASE_URL, API_KEY } from '../../constants/api';
 import { getAccentFromPosterPath } from '../../constants/theme';
 
@@ -24,14 +24,31 @@ type VideoResult = {
   name: string;
 };
 
-type ReelItem = { id: number; mediaType: string; title: string; posterPath?: string | null };
+type ReelItem = {
+  id: number;
+  mediaType: string;
+  title: string;
+  posterPath?: string | null;
+};
 
-const { height } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// We keep 16:9 but crop horizontally inside a 9:16 fullscreen container
+const VIDEO_HEIGHT = SCREEN_HEIGHT;
+const VIDEO_WIDTH = (SCREEN_HEIGHT * 16) / 9;
 
 const ReelPlayerScreen = () => {
   const params = useLocalSearchParams();
   const router = useRouter();
   const { id, mediaType, title, list } = params;
+
+  // Hide status bar for full immersive feel
+  useEffect(() => {
+    StatusBar.setHidden(true, 'fade');
+    return () => {
+      StatusBar.setHidden(false, 'fade');
+    };
+  }, []);
 
   const queue: ReelItem[] = useMemo(() => {
     if (typeof list === 'string') {
@@ -95,7 +112,7 @@ const ReelPlayerScreen = () => {
   };
 
   return (
-    <ScreenWrapper style={styles.wrapper}>
+    <View style={styles.wrapper}>
       <LinearGradient
         colors={[accentColor, 'rgba(5,6,15,0.6)']}
         style={StyleSheet.absoluteFillObject}
@@ -115,6 +132,7 @@ const ReelPlayerScreen = () => {
 
       <FlatList
         ref={listRef}
+        style={{ flex: 1 }}
         data={queue}
         keyExtractor={(item) => item.id.toString()}
         renderItem={({ item, index }) => (
@@ -138,12 +156,12 @@ const ReelPlayerScreen = () => {
         viewabilityConfig={viewabilityConfig}
         onViewableItemsChanged={onViewableItemsChanged}
         getItemLayout={(_, index) => ({
-          length: height,
-          offset: height * index,
+          length: SCREEN_HEIGHT,
+          offset: SCREEN_HEIGHT * index,
           index,
         })}
       />
-    </ScreenWrapper>
+    </View>
   );
 };
 
@@ -211,7 +229,6 @@ const ReelSlide = ({
 
   useEffect(() => {
     if (active && videoKey && !loading && !error) {
-      // Ensure the active reel starts playing as soon as it is ready
       setMuted(true);
       setPlaying(true);
     } else {
@@ -246,43 +263,71 @@ const ReelSlide = ({
 
       {!loading && videoKey && (
         <View style={styles.playerFrame}>
+          {/* Tap anywhere to mute / unmute */}
           <TouchableOpacity
             activeOpacity={1}
             style={StyleSheet.absoluteFill}
             onPress={() => setMuted((m) => !m)}
           />
 
-          <YoutubePlayer
-            ref={playerRef}
-            height={height}
-            play={playing}
-            mute={muted}
-            videoId={videoKey}
-            forceAndroidAutoplay
-            onError={onError}
-            onChangeState={(state: string) => {
-              // console.log('YT state', state);
-              if (state === 'ended') {
-                onAutoPlayNext();
-              }
-            }}
-            initialPlayerParams={{
-              controls: 0,
-              modestbranding: true,
-              rel: false,
-              showinfo: false,
-              playsinline: true,
-              loop: true,
-              playlist: videoKey || undefined,
-              // Some platforms respect this, some ignore it
-              // @ts-ignore
-              autoplay: 1,
-            }}
-            webViewProps={{
-              allowsInlineMediaPlayback: true,
-              mediaPlaybackRequiresUserAction: false,
-            }}
-          />
+          {/* Bigger than the screen horizontally; cropped by playerFrame */}
+          <View style={styles.portraitVideoWrap}>
+            <YoutubePlayer
+              ref={playerRef}
+              height={VIDEO_HEIGHT}
+              width={VIDEO_WIDTH}
+              play={playing}
+              mute={muted}
+              videoId={videoKey}
+              forceAndroidAutoplay
+              onReady={() => {
+                // extra nudge to ensure autoplay & hide poster
+                try {
+                  playerRef.current?.playVideo();
+                } catch (e) {
+                  // ignore
+                }
+              }}
+              onError={onError}
+              onChangeState={(state: string) => {
+                if (state === 'ended') {
+                  onAutoPlayNext();
+                }
+              }}
+              initialPlayerParams={{
+                controls: 0,
+                modestbranding: true,
+                rel: false,
+                showinfo: false,
+                playsinline: true,
+                loop: true,
+                playlist: videoKey || undefined,
+                // @ts-ignore – library accepts number/bool
+                autoplay: 1,
+              }}
+              webViewStyle={styles.portraitWebview}
+              webViewProps={{
+                allowsInlineMediaPlayback: true,
+                mediaPlaybackRequiresUserAction: false,
+                javaScriptEnabled: true,
+                injectedJavaScript: `
+                  (function() {
+                    const style = document.createElement('style');
+                    style.innerHTML = '
+                      .ytp-cued-thumbnail-overlay-image,
+                      .ytp-large-play-button,
+                      .ytp-pause-overlay {
+                        display: none !important;
+                        opacity: 0 !important;
+                      }
+                    ';
+                    document.head.appendChild(style);
+                  })();
+                  true;
+                `,
+              }}
+            />
+          </View>
 
           <LinearGradient
             colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)', 'rgba(5,6,15,0.85)']}
@@ -312,8 +357,7 @@ const ReelSlide = ({
 
 const styles = StyleSheet.create({
   wrapper: {
-    paddingTop: 0,
-    paddingBottom: 0,
+    flex: 1,
     backgroundColor: 'black',
   },
   header: {
@@ -350,11 +394,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
+  slide: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
+  },
+  // fullscreen crop container
   playerFrame: {
-    flex: 1,
-    marginTop: 0,
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT,
     overflow: 'hidden',
-    borderRadius: 0,
+    backgroundColor: '#000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // wider than the screen horizontally; sides cropped
+  portraitVideoWrap: {
+    width: VIDEO_WIDTH,
+    height: VIDEO_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  portraitWebview: {
+    width: VIDEO_WIDTH,
+    height: VIDEO_HEIGHT,
+    alignSelf: 'center',
   },
   bottomGradient: {
     position: 'absolute',
@@ -416,9 +479,6 @@ const styles = StyleSheet.create({
   fallbackText: {
     color: '#fff',
     fontWeight: '700',
-  },
-  slide: {
-    height,
   },
 });
 

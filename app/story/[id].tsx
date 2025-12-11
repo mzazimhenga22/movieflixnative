@@ -1,8 +1,20 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Image, StyleSheet, TouchableOpacity, SafeAreaView, Text, Dimensions, Pressable, Animated, TextInput } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Image,
+  StyleSheet,
+  TouchableOpacity,
+  SafeAreaView,
+  Text,
+  Dimensions,
+  Pressable,
+  Animated,
+  TextInput,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, doc, getDoc, getDocs, orderBy, query, where } from 'firebase/firestore';
+import { LinearGradient } from 'expo-linear-gradient';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { firestore } from '../../constants/firebase';
 import { findOrCreateConversation, sendMessage, type Profile } from '../messaging/controller';
 
@@ -21,10 +33,11 @@ const StoryScreen = () => {
   const [stories, setStories] = useState<(StoryDoc & { id: string })[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [replyText, setReplyText] = useState('');
-  const [isReplyActive, setIsReplyActive] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
   const durationMs = 30000; // 30 seconds per story
   const { width } = Dimensions.get('window');
+  const progressValueRef = useRef(0);
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     const fetchStories = async () => {
@@ -82,25 +95,37 @@ const StoryScreen = () => {
   const currentStory = stories[currentIndex];
   const imageUri = currentStory?.photoURL || (fallbackPhoto as string | undefined);
 
-  const startProgress = () => {
-    progress.setValue(0);
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: durationMs,
-      useNativeDriver: false,
-    }).start(({ finished }) => {
-      if (finished) {
-        handleNext();
-      }
-    });
-  };
+  const startProgress = useCallback(
+    (fromValue = 0) => {
+      progressValueRef.current = fromValue;
+      progress.setValue(fromValue);
+      animationRef.current?.stop();
+      const remaining = Math.max(50, (1 - fromValue) * durationMs);
+      animationRef.current = Animated.timing(progress, {
+        toValue: 1,
+        duration: remaining,
+        useNativeDriver: false,
+      });
+      animationRef.current.start(({ finished }) => {
+        if (finished) {
+          handleNext();
+        }
+      });
+    },
+    [durationMs]
+  );
 
   useEffect(() => {
     if (stories.length > 0) {
-      startProgress();
+      startProgress(0);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex, stories.length]);
+  }, [currentIndex, stories.length, startProgress]);
+
+  useEffect(() => {
+    return () => {
+      animationRef.current?.stop();
+    };
+  }, []);
 
   const handleNext = () => {
     if (currentIndex < stories.length - 1) {
@@ -127,14 +152,18 @@ const StoryScreen = () => {
     }
   };
 
-  const handleSwipeUp = (evt: any) => {
-    const { translationY } = evt.nativeEvent;
-    if (translationY < -30) {
-      setIsReplyActive(true);
-    }
+  const handlePressIn = () => {
+      progress.stopAnimation((value) => {
+        progressValueRef.current = value ?? 0;
+      });
   };
 
-  const handleSendReply = async () => {
+  const handlePressOut = () => {
+    if (stories.length === 0) return;
+    startProgress(progressValueRef.current);
+  };
+
+  const handleSendReply = useCallback(async () => {
     if (!replyText.trim() || !currentStory?.userId) return;
     try {
       const target: Profile = {
@@ -147,12 +176,32 @@ const StoryScreen = () => {
         text: replyText.trim(),
       });
       setReplyText('');
-      setIsReplyActive(false);
       router.push(`/messaging/chat/${conversationId}`);
     } catch (e) {
       console.warn('Failed to send story reply', e);
     }
-  };
+  }, [currentStory?.photoURL, currentStory?.userId, currentStory?.username, replyText, router]);
+
+  const handleQuickReaction = useCallback(
+    async (reaction: string) => {
+      if (!currentStory?.userId) return;
+      try {
+        const target: Profile = {
+          id: currentStory.userId,
+          displayName: currentStory.username || 'Story user',
+          photoURL: currentStory.photoURL || '',
+        } as any;
+        const conversationId = await findOrCreateConversation(target);
+        await sendMessage(conversationId, {
+          text: reaction,
+        });
+        router.push(`/messaging/chat/${conversationId}`);
+      } catch (e) {
+        console.warn('Failed to send quick reaction', e);
+      }
+    },
+    [currentStory?.photoURL, currentStory?.userId, currentStory?.username, router]
+  );
 
   if (!imageUri) {
     return (
@@ -166,23 +215,33 @@ const StoryScreen = () => {
     <View style={styles.container}>
       <SafeAreaView style={styles.header}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.closeButton}>
-            <Ionicons name="chevron-back" size={26} color="white" />
-          </TouchableOpacity>
-          <View style={styles.headerUserRow}>
-            {currentStory?.photoURL ? (
-              <Image source={{ uri: currentStory.photoURL }} style={styles.headerAvatar} />
-            ) : (
-              <View style={[styles.headerAvatar, { backgroundColor: '#333' }]} />
-            )}
-            <View>
-              {currentStory?.username ? (
-                <Text style={styles.headerName}>{currentStory.username}</Text>
-              ) : null}
-              <Text style={styles.headerMeta}>
-                {stories.length > 0 ? `${currentIndex + 1} of ${stories.length}` : ''}
-              </Text>
+          <View style={styles.headerUserBlock}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.closeButton}>
+              <Ionicons name="chevron-back" size={26} color="white" />
+            </TouchableOpacity>
+            <View style={styles.headerUserRow}>
+              {currentStory?.photoURL ? (
+                <Image source={{ uri: currentStory.photoURL }} style={styles.headerAvatar} />
+              ) : (
+                <View style={[styles.headerAvatar, { backgroundColor: '#333' }]} />
+              )}
+              <View>
+                {currentStory?.username ? (
+                  <Text style={styles.headerName}>{currentStory.username}</Text>
+                ) : null}
+                <Text style={styles.headerMeta}>
+                  {stories.length > 0 ? `${currentIndex + 1}/${stories.length}` : ''}
+                </Text>
+              </View>
             </View>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerActionBtn}>
+              <Ionicons name="volume-high-outline" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerActionBtn}>
+              <Ionicons name="ellipsis-horizontal" size={22} color="#fff" />
+            </TouchableOpacity>
           </View>
         </View>
       </SafeAreaView>
@@ -207,8 +266,23 @@ const StoryScreen = () => {
         })}
       </View>
 
-      <Pressable style={styles.tapLayer} onPress={handleTap} onResponderMove={handleSwipeUp}>
-        <Image source={{ uri: imageUri }} style={styles.storyImage} resizeMode="cover" />
+      <Pressable
+        style={styles.tapLayer}
+        onPress={handleTap}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+      >
+        <View style={styles.storyMedia}>
+          <Image source={{ uri: imageUri }} style={styles.storyImage} resizeMode="cover" />
+          <LinearGradient
+            colors={['rgba(0,0,0,0.85)', 'transparent']}
+            style={styles.mediaGradientTop}
+          />
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.85)']}
+            style={styles.mediaGradientBottom}
+          />
+        </View>
 
         {currentStory?.overlayText ? (
           <View style={styles.overlayTextChip}>
@@ -225,29 +299,31 @@ const StoryScreen = () => {
           </View>
         ) : null}
 
-        <View style={styles.replyHintWrapper}>
-          {!isReplyActive && (
-            <Text style={styles.replyHintText}>Swipe up to reply</Text>
-          )}
+        <View style={styles.reactionsRow}>
+          {['👍', '😍', '😂', '🔥'].map((emoji) => (
+            <TouchableOpacity key={emoji} style={styles.reactionBtn} onPress={() => handleQuickReaction(emoji)}>
+              <Text style={styles.reactionText}>{emoji}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
-        {isReplyActive && (
-          <View style={styles.replyBar}>
-            <TextInput
-              style={styles.replyInput}
-              placeholder="Reply to story..."
-              placeholderTextColor="rgba(255,255,255,0.6)"
-              value={replyText}
-              onChangeText={setReplyText}
-              autoFocus
-              returnKeyType="send"
-              onSubmitEditing={handleSendReply}
-            />
-            <TouchableOpacity onPress={handleSendReply} style={styles.replySendBtn}>
-              <Ionicons name="send" size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        )}
+        <View style={styles.replyBar}>
+          <Ionicons name="happy-outline" size={20} color="rgba(255,255,255,0.7)" />
+          <TextInput
+            style={styles.replyInput}
+            placeholder="Send a message"
+            placeholderTextColor="rgba(255,255,255,0.6)"
+            value={replyText}
+            onChangeText={(text) => {
+              setReplyText(text);
+            }}
+            returnKeyType="send"
+            onSubmitEditing={handleSendReply}
+          />
+          <TouchableOpacity onPress={handleSendReply} style={styles.replySendBtn}>
+            <Ionicons name="send" size={20} color="#25D366" />
+          </TouchableOpacity>
+        </View>
       </Pressable>
     </View>
   );
@@ -260,55 +336,85 @@ const styles = StyleSheet.create({
   },
   header: {
     position: 'absolute',
-    top: 10,
+    top: 12,
     left: 0,
     right: 0,
     zIndex: 3,
   },
   storyImage: {
+    width: '100%',
+    height: '100%',
+  },
+  storyMedia: {
     flex: 1,
+  },
+  mediaGradientTop: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 180,
+  },
+  mediaGradientBottom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 200,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingTop: 4,
+    paddingHorizontal: 14,
+    paddingTop: 6,
   },
-  closeButton: {
-    paddingVertical: 4,
-    paddingRight: 10,
-    paddingLeft: 2,
+  headerUserBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   headerUserRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  closeButton: {
+    paddingVertical: 4,
+    paddingRight: 12,
+    paddingLeft: 0,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerActionBtn: {
+    marginLeft: 10,
+    padding: 6,
+  },
   headerAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    marginRight: 10,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.4)',
   },
   headerName: {
     color: '#fff',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 15,
   },
   headerMeta: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 11,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
   },
   tapLayer: {
     flex: 1,
   },
   progressRow: {
     position: 'absolute',
-    top: 64,
-    left: 10,
-    right: 10,
+    top: 58,
+    left: 12,
+    right: 12,
     zIndex: 2,
     flexDirection: 'row',
     gap: 4,
@@ -327,13 +433,13 @@ const styles = StyleSheet.create({
   },
   overlayTextChip: {
     position: 'absolute',
-    top: '20%',
-    left: 20,
-    right: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-    borderRadius: 16,
+    top: '22%',
+    left: 24,
+    right: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderRadius: 18,
   },
   overlayText: {
     color: '#fff',
@@ -345,10 +451,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 0,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    bottom: 120,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
   },
   captionUsername: {
     color: '#fff',
@@ -359,27 +464,35 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.9)',
     fontSize: 14,
   },
-  replyHintWrapper: {
+  reactionsRow: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 80,
-    alignItems: 'center',
+    bottom: 70,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 16,
   },
-  replyHintText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 13,
+  reactionBtn: {
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  reactionText: {
+    fontSize: 18,
+    color: '#fff',
   },
   replyBar: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 14,
+    right: 14,
     bottom: 18,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-    borderRadius: 22,
-    paddingHorizontal: 14,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 999,
+    paddingHorizontal: 16,
     paddingVertical: 8,
   },
   replyInput: {
@@ -387,7 +500,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     paddingVertical: 4,
-    paddingRight: 8,
+    paddingHorizontal: 8,
   },
   replySendBtn: {
     paddingLeft: 8,

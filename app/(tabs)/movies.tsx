@@ -11,7 +11,7 @@ import {
   Easing,
 } from 'react-native';
 import { Ionicons, FontAwesome } from '@expo/vector-icons';
-import { Link, useRouter } from 'expo-router';
+import { Link, useRouter, useFocusEffect } from 'expo-router';
 import { doc, getDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,6 +27,7 @@ import { authPromise, firestore } from '../../constants/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAccentFromPosterPath } from '../../constants/theme';
 import { useAccent } from '../components/AccentContext';
+import { buildProfileScopedKey } from '../../lib/profileStorage';
 
 const shuffleArray = <T,>(array: T[] | undefined): T[] => {
   if (!array) return [];
@@ -37,6 +38,8 @@ const shuffleArray = <T,>(array: T[] | undefined): T[] => {
   }
   return arr;
 };
+
+const KIDS_GENRE_IDS = [10751, 16, 10762];
 
 const LoadingSkeleton = () => (
   <View style={styles.skeletonContainer}>
@@ -129,7 +132,10 @@ const HomeScreen: React.FC = () => {
   const [netflix, setNetflix] = useState<Media[]>([]);
   const [amazon, setAmazon] = useState<Media[]>([]);
   const [hbo, setHbo] = useState<Media[]>([]);
-  const [userName, setUserName] = useState('watcher');
+  const [accountName, setAccountName] = useState('watcher');
+  const [activeProfileName, setActiveProfileName] = useState<string | null>(null);
+  const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+  const [isKidsProfile, setIsKidsProfile] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [continueWatching, setContinueWatching] = useState<Media[]>([]);
@@ -140,6 +146,23 @@ const HomeScreen: React.FC = () => {
   const router = useRouter();
   const [previewVisible, setPreviewVisible] = useState(false);
   const previewTranslate = useRef(new Animated.Value(320)).current;
+
+  const filterForKids = useCallback(
+    (items: Media[] | undefined | null): Media[] => {
+      if (!items || items.length === 0) {
+        return [];
+      }
+      if (!isKidsProfile) {
+        return items;
+      }
+      return items.filter((item) => {
+        const ids = (item.genre_ids || []) as number[];
+        const hasKidsGenre = ids.some((id) => KIDS_GENRE_IDS.includes(id));
+        return !item.adult && hasKidsGenre;
+      });
+    },
+    [isKidsProfile],
+  );
 
   useEffect(() => {
     let unsubAuth: (() => void) | null = null;
@@ -153,7 +176,7 @@ const HomeScreen: React.FC = () => {
           try {
             const userDoc = await getDoc(doc(firestore, 'users', user.uid));
             if (userDoc.exists()) {
-              setUserName((userDoc.data() as any).name ?? 'watcher');
+              setAccountName((userDoc.data() as any).name ?? 'watcher');
             }
           } catch (err) {
             console.error('Failed to fetch user data:', err);
@@ -166,16 +189,16 @@ const HomeScreen: React.FC = () => {
             try {
               const userDoc = await getDoc(doc(firestore, 'users', u.uid));
               if (userDoc.exists()) {
-                setUserName((userDoc.data() as any).name ?? 'watcher');
+                setAccountName((userDoc.data() as any).name ?? 'watcher');
               } else {
-                setUserName('watcher');
+                setAccountName('watcher');
               }
             } catch (err) {
               console.error('Failed to fetch user data on auth change:', err);
-              setUserName('watcher');
+              setAccountName('watcher');
             }
           } else {
-            setUserName('watcher');
+            setAccountName('watcher');
           }
         });
       } catch (err) {
@@ -190,35 +213,126 @@ const HomeScreen: React.FC = () => {
     };
   }, []);
 
+  const homeFeedCacheScope = useMemo(
+    () => `${activeProfileId ?? 'global'}${isKidsProfile ? ':kids' : ''}`,
+    [activeProfileId, isKidsProfile],
+  );
+  const homeFeedCacheKey = useMemo(
+    () => `homeFeedCache:${homeFeedCacheScope}`,
+    [homeFeedCacheScope],
+  );
+
+  const buildKidsUrl = useCallback(
+    (input: string, type: 'movie' | 'tv' | 'all' | 'discover' = 'movie') => {
+      if (!isKidsProfile) return input;
+      const url = new URL(input);
+      url.searchParams.set('include_adult', 'false');
+      url.searchParams.set('with_genres', '10751');
+      if (type === 'movie' || type === 'discover') {
+        url.searchParams.set('certification_country', 'US');
+        url.searchParams.set('certification.lte', 'G');
+      } else if (type === 'tv') {
+        url.searchParams.set('certification_country', 'US');
+        url.searchParams.set('certification.lte', 'TV-Y');
+      } else if (type === 'all') {
+        // when mixing media, prefer the most restrictive rating
+        url.searchParams.set('certification_country', 'US');
+        url.searchParams.set('certification.lte', 'TV-Y');
+      }
+      return url.toString();
+    },
+    [isKidsProfile],
+  );
+
+  const fetchWithKids = useCallback(
+    async (input: string, type: 'movie' | 'tv' | 'all' | 'discover' = 'movie') => {
+      const response = await fetch(buildKidsUrl(input, type));
+      return response.json();
+    },
+    [buildKidsUrl],
+  );
+
+  const fetchProviderMovies = useCallback(
+    async (providerId: number): Promise<Media[]> => {
+      const url = `${API_BASE_URL}/discover/movie?api_key=${API_KEY}&with_watch_providers=${providerId}&watch_region=US&with_watch_monetization_types=flatrate`;
+      const json = await fetchWithKids(url, 'discover');
+      return json?.results || [];
+    },
+    [fetchWithKids],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const syncActiveProfile = async () => {
+        try {
+          const stored = await AsyncStorage.getItem('activeProfile');
+          if (!isActive) return;
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.name) {
+              setActiveProfileName(parsed.name);
+              setActiveProfileId(typeof parsed.id === 'string' ? parsed.id : null);
+              setIsKidsProfile(Boolean(parsed.isKids));
+              return;
+            }
+          }
+          setActiveProfileName(null);
+          setActiveProfileId(null);
+          setIsKidsProfile(false);
+        } catch (err) {
+          console.error('Failed to load active profile', err);
+          if (isActive) {
+            setActiveProfileName(null);
+            setActiveProfileId(null);
+            setIsKidsProfile(false);
+          }
+        }
+      };
+
+      void syncActiveProfile();
+
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
+
   // Load simple watch history for "Continue Watching" and "Because you watched"
   useEffect(() => {
+    let isMounted = true;
     const loadHistory = async () => {
       try {
-        const stored = await AsyncStorage.getItem('watchHistory');
+        const key = buildProfileScopedKey('watchHistory', activeProfileId);
+        const stored = await AsyncStorage.getItem(key);
+        if (!isMounted) return;
         if (stored) {
           const parsed: Media[] = JSON.parse(stored);
           setContinueWatching(parsed);
           setLastWatched(parsed[0] || null);
+        } else {
+          setContinueWatching([]);
+          setLastWatched(null);
         }
       } catch (err) {
-        console.error('Failed to load watch history', err);
+        if (isMounted) {
+          console.error('Failed to load watch history', err);
+          setContinueWatching([]);
+          setLastWatched(null);
+        }
       }
     };
     loadHistory();
-  }, []);
+    return () => {
+      isMounted = false;
+    };
+  }, [activeProfileId]);
 
   useEffect(() => {
-    const fetchProviderMovies = async (providerId: number): Promise<Media[]> => {
-      const res = await fetch(
-        `${API_BASE_URL}/discover/movie?api_key=${API_KEY}&with_watch_providers=${providerId}&watch_region=US&with_watch_monetization_types=flatrate`
-      );
-      const json = await res.json();
-      return json?.results || [];
-    };
-
     const loadFromCache = async () => {
       try {
-        const cached = await AsyncStorage.getItem('homeFeedCache');
+        const cached = await AsyncStorage.getItem(homeFeedCacheKey);
         if (!cached) return false;
 
         const parsed = JSON.parse(cached) as {
@@ -234,10 +348,11 @@ const HomeScreen: React.FC = () => {
           genresData: any;
         };
 
-        const combinedStories = [
-          ...(parsed.movieStoriesData?.results || []),
-          ...(parsed.tvStoriesData?.results || []),
-        ].map((item: any) => ({
+        const cachedMovieStories = filterForKids(
+          (parsed.movieStoriesData?.results || []) as Media[],
+        );
+        const cachedTvStories = filterForKids((parsed.tvStoriesData?.results || []) as Media[]);
+        const combinedStories = [...cachedMovieStories, ...cachedTvStories].map((item: any) => ({
           id: item.id,
           title: item.title || item.name || 'Untitled',
           image: item.poster_path
@@ -246,23 +361,29 @@ const HomeScreen: React.FC = () => {
           media_type: item.media_type,
         }));
 
-        const trendingResults = (parsed.trendingData?.results || []) as Media[];
+        const trendingResults = filterForKids((parsed.trendingData?.results || []) as Media[]);
+        const netflixSafe = filterForKids((parsed.netflix as Media[]) || []);
+        const amazonSafe = filterForKids((parsed.amazon as Media[]) || []);
+        const songsSafe = filterForKids((parsed.songsData?.results || []) as Media[]);
+        const movieReelsSafe = filterForKids((parsed.movieReelsData?.results || []) as Media[]);
+        const recommendedSafe = filterForKids((parsed.recommendedData?.results || []) as Media[]);
+        const hboSource =
+          parsed.hbo && parsed.hbo.length > 0
+            ? (parsed.hbo as Media[])
+            : trendingResults.filter((m) => m.media_type === 'tv');
+        const hboSafe = filterForKids(hboSource);
 
-        setNetflix(parsed.netflix || []);
-        setAmazon(parsed.amazon || []);
-        const hboFallback =
-          (parsed.hbo && parsed.hbo.length > 0
-            ? parsed.hbo
-            : trendingResults.filter((m) => m.media_type === 'tv')) || [];
-        setHbo(hboFallback);
+        setNetflix(netflixSafe);
+        setAmazon(amazonSafe);
+        setHbo(hboSafe);
         setStories(shuffleArray(combinedStories));
         setTrending(trendingResults);
         setFeaturedMovie(trendingResults[0] || null);
-        setTrendingMoviesOnly((parsed.movieStoriesData?.results || []) as Media[]);
-        setTrendingTvOnly((parsed.tvStoriesData?.results || []) as Media[]);
-        setSongs((parsed.songsData?.results || []) as Media[]);
-        setMovieReels((parsed.movieReelsData?.results || []) as Media[]);
-        setRecommended((parsed.recommendedData?.results || []) as Media[]);
+        setTrendingMoviesOnly(cachedMovieStories);
+        setTrendingTvOnly(cachedTvStories);
+        setSongs(songsSafe);
+        setMovieReels(movieReelsSafe);
+        setRecommended(recommendedSafe);
         setGenres((parsed.genresData?.genres || []) as Genre[]);
 
         setLoading(false);
@@ -291,19 +412,18 @@ const HomeScreen: React.FC = () => {
           fetchProviderMovies(8),
           fetchProviderMovies(9),
           fetchProviderMovies(384),
-          fetch(`${API_BASE_URL}/trending/movie/day?api_key=${API_KEY}`).then((r) => r.json()),
-          fetch(`${API_BASE_URL}/trending/tv/day?api_key=${API_KEY}`).then((r) => r.json()),
-          fetch(`${API_BASE_URL}/trending/all/day?api_key=${API_KEY}`).then((r) => r.json()),
-          fetch(`${API_BASE_URL}/movie/upcoming?api_key=${API_KEY}`).then((r) => r.json()),
-          fetch(`${API_BASE_URL}/movie/top_rated?api_key=${API_KEY}`).then((r) => r.json()),
-          fetch(`${API_BASE_URL}/movie/popular?api_key=${API_KEY}`).then((r) => r.json()),
+          fetchWithKids(`${API_BASE_URL}/trending/movie/day?api_key=${API_KEY}`, 'movie'),
+          fetchWithKids(`${API_BASE_URL}/trending/tv/day?api_key=${API_KEY}`, 'tv'),
+          fetchWithKids(`${API_BASE_URL}/trending/all/day?api_key=${API_KEY}`, 'all'),
+          fetchWithKids(`${API_BASE_URL}/movie/upcoming?api_key=${API_KEY}`, 'movie'),
+          fetchWithKids(`${API_BASE_URL}/movie/top_rated?api_key=${API_KEY}`, 'movie'),
+          fetchWithKids(`${API_BASE_URL}/movie/popular?api_key=${API_KEY}`, 'movie'),
           fetch(`${API_BASE_URL}/genre/movie/list?api_key=${API_KEY}`).then((r) => r.json()),
         ]);
 
-        const combinedStories = [
-          ...(movieStoriesData?.results || []),
-          ...(tvStoriesData?.results || []),
-        ].map((item: any) => ({
+        const movieStoriesList = filterForKids((movieStoriesData?.results || []) as Media[]);
+        const tvStoriesList = filterForKids((tvStoriesData?.results || []) as Media[]);
+        const combinedStories = [...movieStoriesList, ...tvStoriesList].map((item: any) => ({
           id: item.id,
           title: item.title || item.name || 'Untitled',
           image: item.poster_path
@@ -312,32 +432,39 @@ const HomeScreen: React.FC = () => {
           media_type: item.media_type,
         }));
 
-        const trendingResults = (trendingData?.results || []) as Media[];
-
-        setNetflix(netflixMovies || []);
-        setAmazon(amazonMovies || []);
-        const hboFallback =
-          (hboMovies && hboMovies.length > 0
+        const trendingRaw = (trendingData?.results || []) as Media[];
+        const trendingResults = filterForKids(trendingRaw);
+        const netflixSafe = filterForKids(netflixMovies || []);
+        const amazonSafe = filterForKids(amazonMovies || []);
+        const songsSafe = filterForKids((songsData?.results || []) as Media[]);
+        const movieReelsSafe = filterForKids((movieReelsData?.results || []) as Media[]);
+        const recommendedSafe = filterForKids((recommendedData?.results || []) as Media[]);
+        const hboSource =
+          hboMovies && hboMovies.length > 0
             ? hboMovies
-            : trendingResults.filter((m) => m.media_type === 'tv')) || [];
-        setHbo(hboFallback);
+            : trendingRaw.filter((m) => m.media_type === 'tv');
+        const hboSafe = filterForKids(hboSource);
+
+        setNetflix(netflixSafe || []);
+        setAmazon(amazonSafe || []);
+        setHbo(hboSafe);
         setStories(shuffleArray(combinedStories));
         setTrending(trendingResults);
         setFeaturedMovie(trendingResults[0] || null);
-        setTrendingMoviesOnly((movieStoriesData?.results || []) as Media[]);
-        setTrendingTvOnly((tvStoriesData?.results || []) as Media[]);
-        setSongs((songsData?.results || []) as Media[]);
-        setMovieReels((movieReelsData?.results || []) as Media[]);
-        setRecommended((recommendedData?.results || []) as Media[]);
+        setTrendingMoviesOnly(movieStoriesList);
+        setTrendingTvOnly(tvStoriesList);
+        setSongs(songsSafe);
+        setMovieReels(movieReelsSafe);
+        setRecommended(recommendedSafe);
         setGenres((genresData?.genres || []) as Genre[]);
 
         try {
           await AsyncStorage.setItem(
-            'homeFeedCache',
+            homeFeedCacheKey,
             JSON.stringify({
-              netflix: netflixMovies || [],
-              amazon: amazonMovies || [] as Media[],
-              hbo: hboMovies || [] as Media[],
+              netflix: netflixSafe,
+              amazon: amazonSafe,
+              hbo: hboSafe,
               movieStoriesData,
               tvStoriesData,
               trendingData,
@@ -361,16 +488,14 @@ const HomeScreen: React.FC = () => {
     const init = async () => {
       setLoading(true);
       const hadCache = await loadFromCache();
-      // Always refresh in background so cache stays up-to-date
       fetchData();
       if (!hadCache) {
-        // If no cache, loading spinner will stop when fetch completes
         return;
       }
     };
 
     init();
-  }, []);
+  }, [fetchProviderMovies, fetchWithKids, homeFeedCacheKey, filterForKids]);
 
   const handleOpenDetails = useCallback(
     async (item: Media) => {
@@ -378,18 +503,19 @@ const HomeScreen: React.FC = () => {
         const mediaType = (item.media_type || 'movie') as string;
         router.push(`/details/${item.id}?mediaType=${mediaType}`);
 
-        const stored = await AsyncStorage.getItem('watchHistory');
+        const storageKey = buildProfileScopedKey('watchHistory', activeProfileId);
+        const stored = await AsyncStorage.getItem(storageKey);
         const existing: Media[] = stored ? JSON.parse(stored) : [];
         const deduped = existing.filter((m) => m.id !== item.id);
         const updated = [item, ...deduped].slice(0, 20);
         setContinueWatching(updated);
         setLastWatched(item);
-        await AsyncStorage.setItem('watchHistory', JSON.stringify(updated));
+        await AsyncStorage.setItem(storageKey, JSON.stringify(updated));
       } catch (err) {
         console.error('Failed to update watch history', err);
       }
     },
-    [router]
+    [router, activeProfileId]
   );
 
   const applyFilter = useCallback(
@@ -480,6 +606,7 @@ const HomeScreen: React.FC = () => {
   };
 
   const displayedStories = stories.slice(storyIndex, storyIndex + 4);
+  const showStoriesSection = !isKidsProfile && stories.length > 0;
   const trendingCount = trending.length;
   const reelsCount = movieReels.length;
   const { setAccentColor } = useAccent();
@@ -569,7 +696,9 @@ const HomeScreen: React.FC = () => {
                 <View style={styles.accentDot} />
                 <View>
                   <Text style={styles.headerEyebrow}>Tonight&apos;s picks</Text>
-                  <Text style={styles.headerText}>Welcome, {userName}</Text>
+                  <Text style={styles.headerText}>
+                    Welcome, {activeProfileName ?? accountName}
+                  </Text>
                 </View>
               </View>
 
@@ -682,9 +811,11 @@ const HomeScreen: React.FC = () => {
                     </View>
                   )}
 
-                  <View style={[styles.sectionBlock, styles.storiesSection]}>
-                    <Story stories={displayedStories} />
-                  </View>
+                  {showStoriesSection && (
+                    <View style={[styles.sectionBlock, styles.storiesSection]}>
+                      <Story stories={displayedStories} />
+                    </View>
+                  )}
 
                   {/* Main filter chips below stories */}
                   <View style={styles.filterRow}>

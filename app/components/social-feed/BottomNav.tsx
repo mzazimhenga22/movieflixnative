@@ -5,11 +5,69 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useUser } from '../../../hooks/use-user';
+import { NOTIFICATION_BADGE_STORAGE_PREFIX } from '../../../constants/notifications';
 
 export default function BottomNav() {
   const router = useRouter();
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
+  const { user } = useUser();
+  const [notificationBadge, setNotificationBadge] = React.useState(0);
+  const badgeStorageKey = React.useMemo(
+    () => `${NOTIFICATION_BADGE_STORAGE_PREFIX}${user?.uid ?? 'guest'}`,
+    [user?.uid],
+  );
+
+  const syncBadge = React.useCallback(async () => {
+    try {
+      const stored = await AsyncStorage.getItem(badgeStorageKey);
+      if (!stored) {
+        setNotificationBadge(0);
+        return;
+      }
+
+      let parsed: any = stored;
+      if (stored.startsWith('{') || stored.startsWith('[')) {
+        try {
+          parsed = JSON.parse(stored);
+        } catch {
+          parsed = stored;
+        }
+      }
+
+      let next = 0;
+      if (typeof parsed === 'number') {
+        next = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        const raw = parsed.all ?? parsed.total ?? parsed.count ?? 0;
+        next = Number(raw) || 0;
+      } else {
+        next = Number(parsed) || 0;
+      }
+
+      if (!Number.isFinite(next) || next < 0) {
+        next = 0;
+      }
+      setNotificationBadge(next);
+    } catch (err) {
+      console.warn('Failed to read notification badge count', err);
+      setNotificationBadge(0);
+    }
+  }, [badgeStorageKey]);
+
+  React.useEffect(() => {
+    syncBadge();
+    const interval = setInterval(syncBadge, 10000);
+    return () => {
+      clearInterval(interval);
+    };
+  }, [syncBadge]);
+
+  React.useEffect(() => {
+    syncBadge();
+  }, [pathname, syncBadge]);
 
   const isSocialRoute = pathname?.startsWith('/social-feed');
   const isActive = (route: string) => {
@@ -50,6 +108,7 @@ export default function BottomNav() {
             icon="notifications"
             label="Notifications"
             active={isActive('notifications')}
+            badgeCount={notificationBadge}
           />
           <NavItem
             onPress={() => router.push('/social-feed/streaks')}
@@ -74,12 +133,17 @@ function NavItem({
   icon,
   label,
   active,
+  badgeCount,
 }: {
   onPress: () => void;
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   active?: boolean;
+  badgeCount?: number;
 }) {
+  const showBadge = typeof badgeCount === 'number' && badgeCount > 0;
+  const badgeDisplay = badgeCount && badgeCount > 99 ? '99+' : badgeCount && badgeCount > 9 ? '9+' : badgeCount;
+
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -97,11 +161,18 @@ function NavItem({
             style={styles.activePill}
           />
         )}
-        <Ionicons
-          name={icon}
-          size={22}
-          color={active ? '#ffffff' : '#f5f5f5'}
-        />
+        <View style={styles.iconWrap}>
+          <Ionicons
+            name={icon}
+            size={22}
+            color={active ? '#ffffff' : '#f5f5f5'}
+          />
+          {showBadge && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{badgeDisplay}</Text>
+            </View>
+          )}
+        </View>
         <Text style={[styles.text, active ? styles.activeText : undefined]}>
           {label}
         </Text>
@@ -185,5 +256,29 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: 16,
     opacity: 0.98,
+  },
+  iconWrap: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -10,
+    backgroundColor: '#e50914',
+    borderRadius: 10,
+    minWidth: 18,
+    paddingHorizontal: 4,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.8)',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
 });

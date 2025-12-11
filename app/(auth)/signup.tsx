@@ -44,9 +44,10 @@ const SignupScreen = () => {
         await setDoc(doc(firestore, 'users', user.uid), {
           displayName: name,
           email: email,
+          planTier: 'free',
         });
 
-        router.replace('/(tabs)/movies');
+        router.replace('/select-profile');
       } else {
         Alert.alert('Error', 'There was an issue signing up. Please try again.');
       }

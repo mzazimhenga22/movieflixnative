@@ -16,7 +16,7 @@ const CastList: React.FC<Props> = ({ cast }) => {
       <FlatList
         data={cast}
         renderItem={({ item }) => <CastMemberCard member={item} />}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 15 }}

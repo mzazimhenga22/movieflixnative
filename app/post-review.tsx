@@ -8,7 +8,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useUser } from '../hooks/use-user';
 import { useRouter } from 'expo-router';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { firestore } from '../constants/firebase';
 
 if (typeof atob === 'undefined') {
@@ -46,6 +46,25 @@ export default function PostReviewScreen() {
     }
 
     try {
+      let authorDisplayName = user?.displayName ?? 'watcher';
+      let authorAvatar = (user as any)?.photoURL ?? null;
+      let authorHandle: string | null = null;
+
+      if (effectiveUser?.uid) {
+        try {
+          const profileRef = doc(firestore, 'users', effectiveUser.uid);
+          const profileSnap = await getDoc(profileRef);
+          if (profileSnap.exists()) {
+            const profileData = profileSnap.data() as any;
+            authorDisplayName = profileData.name ?? profileData.displayName ?? authorDisplayName;
+            authorAvatar = profileData.avatar ?? profileData.photoURL ?? authorAvatar;
+            authorHandle = profileData.username ?? profileData.handle ?? authorHandle;
+          }
+        } catch (profileError) {
+          console.warn('Failed to load user profile for review posting', profileError);
+        }
+      }
+
       let finalUri = media.uri;
       let contentType = media.type === 'image' ? 'image/jpeg' : 'video/mp4';
 
@@ -103,6 +122,9 @@ export default function PostReviewScreen() {
       try {
         await addDoc(collection(firestore, 'reviews'), {
           userId: effectiveUser.uid,
+          userDisplayName: authorDisplayName,
+          userName: authorHandle ?? authorDisplayName,
+          userAvatar: authorAvatar,
           review: reviewData.review ?? '',
           title: reviewData.title ?? '',
           rating: reviewData.rating ?? 0,

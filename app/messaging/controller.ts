@@ -522,7 +522,13 @@ export const findOrCreateConversation = async (otherUser: Profile): Promise<stri
 
   querySnapshot.forEach(docSnap => {
     const data = docSnap.data();
-    if (data.members.includes(otherUser.id)) {
+    const members = Array.isArray(data.members) ? data.members : [];
+    const isGroup = !!data.isGroup;
+
+    // Only treat as an existing 1:1 conversation if:
+    // - it isn't marked as a group, and
+    // - it has exactly the two participant ids
+    if (!isGroup && members.length === 2 && members.includes(otherUser.id)) {
       conversationId = docSnap.id;
     }
   });
@@ -570,6 +576,13 @@ export const findUserByUsername = async (username: string): Promise<Profile | nu
 
   const userDoc = querySnapshot.docs[0];
   return { ...userDoc.data(), id: userDoc.id } as Profile;
+};
+
+export const getProfileById = async (userId: string): Promise<Profile | null> => {
+  const userDocRef = doc(firestore, 'users', userId);
+  const userDoc = await getDoc(userDocRef);
+  if (!userDoc.exists()) return null;
+  return { id: userDoc.id, ...(userDoc.data() as Record<string, any>) } as Profile;
 };
 
 export default {};

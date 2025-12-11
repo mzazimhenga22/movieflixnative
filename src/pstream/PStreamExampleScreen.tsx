@@ -23,40 +23,7 @@ export default function App() {
     scrape(media);
   };
 
-  // choose playable uri and headers from result
-  const streamLike: any = (result as any)?.stream ?? result; // stub returns string; real provider returns object
-  const firstStream = Array.isArray(streamLike) ? streamLike[0] : streamLike;
-
-  // helper to pick a playable uri for file/hls
-  const pickUriAndHeaders = (s: any) => {
-    if (!s) return null;
-
-    if (typeof s === 'string') {
-      return { uri: s };
-    }
-
-    if (s.type === 'hls') {
-      // playlist will be an m3u8 (maybe proxied). headers may be present
-      return { uri: s.playlist, headers: s.headers ?? undefined };
-    }
-
-    if (s.type === 'file') {
-      // choose best quality (1080 -> 720 -> first)
-      const qualities = s.qualities || s.streams || {};
-      const keys = Object.keys(qualities);
-      if (keys.length === 0) return null;
-
-      // prefer 1080, 720, then first
-      const preferred = ['1080', '720', '480', '360', 'unknown'];
-      let foundKey = keys.find((k) => preferred.includes(k.toString())) ?? keys[0];
-      const file = qualities[foundKey];
-      return { uri: file.url, headers: s.headers ?? undefined };
-    }
-
-    return null;
-  };
-
-  const playable = pickUriAndHeaders(firstStream);
+  const playable = result ? { uri: result.uri, headers: result.headers } : null;
 
   return (
     <SafeAreaView style={styles.container}>
