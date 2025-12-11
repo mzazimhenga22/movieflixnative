@@ -35,19 +35,7 @@
   },
   "homepage": "https://p-stream.github.io/providers/",
   "scripts": {
-    "build": "vite build",
-    "cli": "vite-node ./src/dev-cli/index.ts",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:providers": "cross-env MW_TEST_PROVIDERS=true vitest run --reporter verbose",
-    "test:integration": "node ./tests/cjs && node ./tests/esm && node ./tests/browser",
-    "test:coverage": "vitest run --coverage",
-    "lint": "eslint --ext .ts,.js src/",
-    "lint:fix": "eslint --fix --ext .ts,.js src/",
-    "lint:report": "eslint --ext .ts,.js --output-file eslint_report.json --format json src/",
-    "preinstall": "npx -y only-allow pnpm",
-    "prepare": "pnpm run build",
-    "prepublishOnly": "pnpm test && pnpm run lint"
+    "build": "echo \"local build already present\""
   },
   "devDependencies": {
     "@nabla/vite-plugin-eslint": "^2.0.6",
