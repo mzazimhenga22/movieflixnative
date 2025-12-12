@@ -8,7 +8,7 @@ import { decode } from 'base-64';
 import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useUser } from '../hooks/use-user';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { firestore } from '../constants/firebase';
 
 export default function StoryUpload() {
@@ -94,13 +94,17 @@ export default function StoryUpload() {
 
       const { data: publicUrl } = supabase.storage.from('stories').getPublicUrl(fileName);
 
+      const expiresAt = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
+
       await addDoc(collection(firestore, 'stories'), {
         userId: effectiveUser.uid,
         username: (effectiveUser.displayName as string) || 'You',
         photoURL: publicUrl.publicUrl,
+        userAvatar: effectiveUser.photoURL || null,
         caption,
         overlayText,
         createdAt: serverTimestamp(),
+        expiresAt,
       });
 
       Alert.alert('Story posted', 'Your story is now live.');

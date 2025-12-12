@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,7 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy'; // 👈 use legacy FS API
@@ -90,6 +90,48 @@ const SelectProfileScreen = () => {
   const canAddProfile = profiles.length < profileLimit;
   const previewAvatarSource = avatarUri || editingProfile?.photoURL || null;
   const isEditing = Boolean(editingProfile);
+  const profileCacheKey = currentUser ? `profileCache:${currentUser.uid}` : null;
+
+  const loadPlanTier = useCallback(async () => {
+    if (!currentUser) {
+      setPlanTier('free');
+      return;
+    }
+
+    let resolvedPlan: PlanTier = 'free';
+
+    try {
+      const userDocRef = doc(firestore, 'users', currentUser.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      const rawPlan = (
+        (userDocSnap.data()?.planTier as string | undefined) ?? 'free'
+      ).toLowerCase() as PlanTier;
+
+      if (rawPlan === 'premium' || rawPlan === 'plus' || rawPlan === 'free') {
+        resolvedPlan = rawPlan;
+      } else {
+        resolvedPlan = 'free';
+      }
+    } catch (err) {
+      console.warn('[select-profile] failed to read plan tier', err);
+      resolvedPlan = 'free';
+    }
+
+    try {
+      const override = await AsyncStorage.getItem('planTierOverride');
+      if (
+        override === 'premium' ||
+        override === 'plus' ||
+        override === 'free'
+      ) {
+        resolvedPlan = override;
+      }
+    } catch (err) {
+      console.warn('[select-profile] failed to read plan override', err);
+    }
+
+    setPlanTier(resolvedPlan);
+  }, [currentUser]);
 
   // 🔍 Debug: confirm Supabase config in the app
   useEffect(() => {
@@ -126,101 +168,112 @@ const SelectProfileScreen = () => {
   }, [authChecked, currentUser, router]);
 
   useEffect(() => {
+    let isMounted = true;
+
+    const hydrateProfilesFromCache = async () => {
+      if (!profileCacheKey) {
+        if (isMounted) {
+          setProfiles([]);
+          setLoadingProfiles(false);
+        }
+        return;
+      }
+
+      try {
+        const cached = await AsyncStorage.getItem(profileCacheKey);
+        if (!isMounted || !cached) return;
+        const parsed = JSON.parse(cached) as HouseholdProfile[];
+        if (Array.isArray(parsed)) {
+          setProfiles(parsed);
+          if (parsed.length === 0) {
+            setShowCreateCard(true);
+          }
+          setLoadingProfiles(false);
+        }
+      } catch (err) {
+        console.warn('[select-profile] failed to read cached profiles', err);
+      }
+    };
+
+    void hydrateProfilesFromCache();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [profileCacheKey]);
+
+  useEffect(() => {
+    void loadPlanTier();
+  }, [loadPlanTier]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadPlanTier();
+    }, [loadPlanTier])
+  );
+
+  useEffect(() => {
     if (!currentUser) {
       setProfiles([]);
       setLoadingProfiles(false);
       return;
     }
 
-    setLoadingProfiles(true);
     let unsubProfiles: Unsubscribe | undefined;
 
-    const fetchPlanAndProfiles = async () => {
-      let resolvedPlan: PlanTier = 'free';
-
-      try {
-        const userDocRef = doc(firestore, 'users', currentUser.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        const rawPlan = (
-          (userDocSnap.data()?.planTier as string | undefined) ?? 'free'
-        ).toLowerCase() as PlanTier;
-
-        if (rawPlan === 'premium' || rawPlan === 'plus' || rawPlan === 'free') {
-          resolvedPlan = rawPlan;
-        } else {
-          resolvedPlan = 'free';
-        }
-      } catch (err) {
-        console.warn('[select-profile] failed to read plan tier', err);
-        resolvedPlan = 'free';
-      }
-
-      try {
-        const override = await AsyncStorage.getItem('planTierOverride');
-        if (
-          override === 'premium' ||
-          override === 'plus' ||
-          override === 'free'
-        ) {
-          resolvedPlan = override;
-        }
-      } catch (err) {
-        console.warn('[select-profile] failed to read plan override', err);
-      }
-
-      setPlanTier(resolvedPlan);
-
-      try {
-        const profilesRef = collection(firestore, 'users', currentUser.uid, 'profiles');
-        const q = query(profilesRef, orderBy('createdAt', 'asc'));
-        unsubProfiles = onSnapshot(
-          q,
-          (snapshot) => {
-            const nextProfiles = snapshot.docs.map((docSnap) => {
-              const data = docSnap.data() as DocumentData;
-              return {
-                id: docSnap.id,
-                name:
-                  typeof data.name === 'string' && data.name.trim().length > 0
-                    ? data.name
-                    : 'Profile',
-                avatarColor:
-                  typeof data.avatarColor === 'string' && data.avatarColor.trim()
-                    ? data.avatarColor
-                    : palette[0],
-                photoURL: typeof data.photoURL === 'string' ? data.photoURL : null,
-                photoPath: typeof data.photoPath === 'string' ? data.photoPath : null,
-                isKids: Boolean(data.isKids),
-              };
-            });
-            setProfiles(nextProfiles);
-            setErrorCopy(null);
-            setLoadingProfiles(false);
-            if (nextProfiles.length === 0) {
-              setShowCreateCard(true);
-            }
-          },
-          (error) => {
-            console.error('[select-profile] profile snapshot failed', error);
-            setProfiles([]);
-            setLoadingProfiles(false);
-            setErrorCopy('We could not load your profiles.');
+    try {
+      const profilesRef = collection(firestore, 'users', currentUser.uid, 'profiles');
+      const q = query(profilesRef, orderBy('createdAt', 'asc'));
+      unsubProfiles = onSnapshot(
+        q,
+        (snapshot) => {
+          const nextProfiles = snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() as DocumentData;
+            return {
+              id: docSnap.id,
+              name:
+                typeof data.name === 'string' && data.name.trim().length > 0
+                  ? data.name
+                  : 'Profile',
+              avatarColor:
+                typeof data.avatarColor === 'string' && data.avatarColor.trim()
+                  ? data.avatarColor
+                  : palette[0],
+              photoURL: typeof data.photoURL === 'string' ? data.photoURL : null,
+              photoPath: typeof data.photoPath === 'string' ? data.photoPath : null,
+              isKids: Boolean(data.isKids),
+            };
+          });
+          setProfiles(nextProfiles);
+          setErrorCopy(null);
+          setLoadingProfiles(false);
+          if (nextProfiles.length === 0) {
+            setShowCreateCard(true);
+          } else {
+            setShowCreateCard(false);
           }
-        );
-      } catch (err) {
-        console.error('[select-profile] failed to load profiles', err);
-        setProfiles([]);
-        setLoadingProfiles(false);
-        setErrorCopy('We could not load your profiles.');
-      }
-    };
-
-    void fetchPlanAndProfiles();
+          if (profileCacheKey) {
+            AsyncStorage.setItem(profileCacheKey, JSON.stringify(nextProfiles)).catch((err) => {
+              console.warn('[select-profile] failed to cache profiles', err);
+            });
+          }
+        },
+        (error) => {
+          console.error('[select-profile] profile snapshot failed', error);
+          setLoadingProfiles(false);
+          setErrorCopy('We could not load your profiles.');
+        }
+      );
+    } catch (err) {
+      console.error('[select-profile] failed to load profiles', err);
+      setLoadingProfiles(false);
+      setErrorCopy('We could not load your profiles.');
+    }
 
     return () => {
       if (unsubProfiles) unsubProfiles();
     };
-  }, [currentUser]);
+  }, [currentUser, profileCacheKey]);
 
   useEffect(() => {
     if (!loadingProfiles && profiles.length === 0) {

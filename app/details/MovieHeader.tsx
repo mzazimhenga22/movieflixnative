@@ -28,6 +28,9 @@ interface Props {
   isPStreamPlaying: boolean; // New prop to indicate if p-stream is playing
   accentColor: string;
   isPlayLoading?: boolean;
+  onDownload?: () => void;
+  downloadStatus?: 'idle' | 'preparing' | 'downloading';
+  downloadProgress?: number | null;
 }
 
 const MovieHeader: React.FC<Props> = ({
@@ -40,8 +43,17 @@ const MovieHeader: React.FC<Props> = ({
   isPStreamPlaying,
   accentColor,
   isPlayLoading,
+  onDownload,
+  downloadStatus = 'idle',
+  downloadProgress = null,
 }) => {
   const backdropUri = movie ? `${IMAGE_BASE_URL}${movie.backdrop_path || movie.poster_path}` : null;
+  const isDownloadBusy = downloadStatus !== 'idle';
+  const downloadLabel = isDownloadBusy
+    ? downloadProgress && downloadProgress > 0
+      ? `Downloading ${Math.round(downloadProgress * 100)}%`
+      : 'Downloading...'
+    : 'Download';
 
   return (
     <View style={styles.backdropContainer}>
@@ -109,21 +121,28 @@ const MovieHeader: React.FC<Props> = ({
         {[
           { key: 'trailer', icon: 'play', label: 'Trailer' },
           { key: 'my-list', icon: 'plus', label: 'My List' },
-          { key: 'download', icon: 'download', label: 'Download' },
+          { key: 'download', icon: 'download', label: downloadLabel },
           { key: 'rate', icon: 'star', label: 'Rate' },
         ].map((btn, i) => (
           <TouchableOpacity
             key={i}
             style={styles.actionItem}
+            disabled={btn.key === 'download' && isDownloadBusy}
             onPress={() => {
               if (btn.key === 'my-list') {
                 onAddToMyList();
               } else if (btn.key === 'trailer') {
                 onWatchTrailer();
+              } else if (btn.key === 'download') {
+                onDownload?.();
               }
             }}
           >
-            <FontAwesome name={btn.icon as any} size={18} color="white" />
+            {btn.key === 'download' && isDownloadBusy ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <FontAwesome name={btn.icon as any} size={18} color="white" />
+            )}
             <Text style={styles.actionLabel}>{btn.label}</Text>
           </TouchableOpacity>
         ))}

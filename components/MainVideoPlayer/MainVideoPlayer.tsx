@@ -211,27 +211,29 @@ export function MainVideoPlayer({ videoSource }: MainVideoPlayerProps) {
       {/* Controls Overlay */}
       <View style={styles.controlsOverlay}>
         <View style={styles.bottomControlsContainer}>
-          <View style={styles.bottomRowControls}>
-            <PlayPauseButton isPlaying={isPlaying} onPress={handlePlayPause} />
+          <View style={styles.transportRow}>
+            <View style={styles.transportCluster}>
+              <SeekButton isForward={false} onPress={() => handleSeek(-10)} />
+              <PlayPauseButton isPlaying={isPlaying} onPress={handlePlayPause} />
+              <SeekButton isForward={true} onPress={() => handleSeek(10)} />
+            </View>
+            <View style={styles.utilityCluster}>
+              <MuteButton isMuted={isMuted} onPress={handleMuteToggle} />
+              <PlaybackSpeedButton currentSpeed={playbackSpeed} onPress={handlePlaybackSpeedChange} />
+              <PipButton isPipActive={isPipActive} onPress={handlePipToggle} />
+              <FullscreenButton isFullscreen={isFullscreen} onPress={handleFullscreenToggle} />
+            </View>
+          </View>
 
-            <SeekButton isForward={false} onPress={() => handleSeek(-10)} />
-            <SeekButton isForward={true} onPress={() => handleSeek(10)} />
-
-            <ProgressBar
-              positionMillis={positionMillis}
-              durationMillis={durationMillis}
-              onValueChange={handleSliderValueChange}
-            />
-
+          <View style={styles.timelineRow}>
+            <View style={styles.timelineProgress}>
+              <ProgressBar
+                positionMillis={positionMillis}
+                durationMillis={durationMillis}
+                onValueChange={handleSliderValueChange}
+              />
+            </View>
             <Timer positionMillis={positionMillis} durationMillis={durationMillis} />
-
-            <MuteButton isMuted={isMuted} onPress={handleMuteToggle} />
-
-            <PlaybackSpeedButton currentSpeed={playbackSpeed} onPress={handlePlaybackSpeedChange} />
-
-            <PipButton isPipActive={isPipActive} onPress={handlePipToggle} />
-
-            <FullscreenButton isFullscreen={isFullscreen} onPress={handleFullscreenToggle} />
           </View>
         </View>
       </View>
@@ -264,13 +266,34 @@ const styles = StyleSheet.create({
   },
   bottomControlsContainer: {
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
-  bottomRowControls: {
+  transportRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    marginBottom: 6,
+  },
+  transportCluster: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 18,
+  },
+  utilityCluster: {
+    flexShrink: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  timelineProgress: {
+    flex: 1,
   },
 });
 

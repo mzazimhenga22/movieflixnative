@@ -1,19 +1,35 @@
 import { useState, useCallback } from 'react';
 import { Buffer } from 'buffer';
-import {
-  makeProviders,
-  makeStandardFetcher,
-  targets,
-  type ProviderControls,
-  type RunOutput,
-  type ScrapeMedia,
-  type Stream,
-  type Qualities,
+import type {
+  ProviderControls,
+  RunOutput,
+  ScrapeMedia,
+  Stream,
+  Qualities,
 } from '../../providers-temp/lib/index.js';
 
 if (typeof globalThis.Buffer === 'undefined') {
   (globalThis as any).Buffer = Buffer;
 }
+
+const bufferProto = (globalThis.Buffer as any)?.prototype ?? (Buffer.prototype as any);
+if (bufferProto && !bufferProto.__base64UrlPolyfillApplied) {
+  const originalToString = bufferProto.toString;
+  bufferProto.toString = function patchedToString(encoding?: string, start?: number, end?: number) {
+    if (encoding === 'base64url') {
+      const base64 = originalToString.call(this, 'base64', start, end);
+      return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    return originalToString.call(this, encoding, start, end);
+  };
+  bufferProto.__base64UrlPolyfillApplied = true;
+}
+
+const {
+  makeProviders,
+  makeStandardFetcher,
+  targets,
+} = require('../../providers-temp/lib/index.js') as typeof import('../../providers-temp/lib/index.js');
 
 export type PStreamPlayback = {
   uri: string;
@@ -38,7 +54,7 @@ function getProviders(): ProviderControls {
       proxiedFetcher: sharedFetcher,
       target: targets.NATIVE,
       consistentIpForRequests: true,
-      proxyStreams: true,
+      proxyStreams: false,
       externalSources: 'all',
     });
   }
@@ -84,21 +100,59 @@ function buildPlayback(output: RunOutput): PStreamPlayback {
   };
 }
 
+type ScrapeOptions = {
+  sourceOrder?: string[];
+  debugTag?: string;
+};
+
+const createDebugEvents = (tag: string, suffix?: string) => {
+  const label = suffix ? `${tag} ${suffix}` : tag;
+  return {
+    init(evt: any) {
+      console.log(`[PStream] ${label} :: init`, evt.sourceIds);
+    },
+    start(id: string) {
+      console.log(`[PStream] ${label} :: start`, id);
+    },
+    discoverEmbeds(evt: any) {
+      console.log(`[PStream] ${label} :: embeds`, evt);
+    },
+    update(evt: any) {
+      if (evt.status === 'failure') {
+        console.warn(`[PStream] ${label} :: ${evt.id} failed`, evt.error);
+      } else if (evt.status === 'notfound') {
+        console.log(`[PStream] ${label} :: ${evt.id} not found`, evt.reason);
+      } else if (evt.status === 'success') {
+        console.log(`[PStream] ${label} :: ${evt.id} success`);
+      }
+    },
+  };
+};
+
 export function usePStream() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PStreamPlayback | null>(null);
 
-  const scrape = useCallback(async (media: ScrapeMedia): Promise<PStreamPlayback> => {
+  const scrape = useCallback(async (media: ScrapeMedia, options?: ScrapeOptions): Promise<PStreamPlayback> => {
     setLoading(true);
     setError(null);
     setResult(null);
     try {
       const providers = getProviders();
-      const runResult = await providers.runAll({
-        media,
-        disableOpensubtitles: true,
-      });
+      const executeRun = async (order?: string[], debugSuffix?: string) =>
+        providers.runAll({
+          media,
+          disableOpensubtitles: true,
+          ...(order?.length ? { sourceOrder: order } : {}),
+          ...(options?.debugTag ? { events: createDebugEvents(options.debugTag, debugSuffix) } : {}),
+        });
+
+      let runResult = await executeRun(options?.sourceOrder, '(preferred)');
+      if (!runResult && options?.sourceOrder?.length) {
+        console.warn('[PStream] Preferred source order returned nothing. Retrying default order.');
+        runResult = await executeRun(undefined, '(default)');
+      }
       if (!runResult) {
         throw new Error('No providers returned a playable stream.');
       }

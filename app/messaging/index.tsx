@@ -56,6 +56,37 @@ type Story = {
   username?: string;
   avatar?: string;      // <- match StoryLike (string | undefined), no null
   mediaUrl?: string;
+  photoURL?: string;
+  userAvatar?: string | null;
+  caption?: string;
+  createdAt?: any;
+};
+
+type StoryRailEntry = Story & {
+  latestStoryId?: string | null;
+  latestCreatedAt?: number | null;
+  hasStory?: boolean;
+  isSelf?: boolean;
+  timestampLabel?: string | null;
+  displayAvatar?: string | null;
+};
+
+const STORY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const formatStoryTime = (timestamp?: number | null) => {
+  if (!timestamp) return null;
+  const diff = Date.now() - timestamp;
+  if (diff < 60 * 1000) return 'Just now';
+  if (diff < 60 * 60 * 1000) {
+    const minutes = Math.max(1, Math.floor(diff / (60 * 1000)));
+    return `${minutes}m ago`;
+  }
+  if (diff < 24 * 60 * 60 * 1000) {
+    const hours = Math.max(1, Math.floor(diff / (60 * 60 * 1000)));
+    return `${hours}h ago`;
+  }
+  const date = new Date(timestamp);
+  return date.toLocaleDateString();
 };
 
 const MessagingScreen = () => {
@@ -90,6 +121,65 @@ const MessagingScreen = () => {
   const [didBootstrapFollowingStreaks, setDidBootstrapFollowingStreaks] = useState(false);
   const [isStartingCall, setIsStartingCall] = useState(false);
   const incomingCall = useIncomingCall(user?.uid);
+  const groupedStories = useMemo<StoryRailEntry[]>(() => {
+    const map = new Map<string, StoryRailEntry>();
+    stories.forEach((story) => {
+      if (!story?.userId) return;
+      const createdAtMs =
+        story.createdAt && typeof story.createdAt?.toMillis === 'function'
+          ? story.createdAt.toMillis()
+          : null;
+      if (createdAtMs && Date.now() - createdAtMs > STORY_WINDOW_MS) {
+        return;
+      }
+      const existing = map.get(story.userId);
+      if (!existing || (createdAtMs ?? 0) > (existing.latestCreatedAt ?? 0)) {
+        map.set(story.userId, {
+          ...story,
+          latestStoryId: story.id,
+          latestCreatedAt: createdAtMs,
+          hasStory: true,
+          displayAvatar: story.userAvatar || story.avatar || story.photoURL || null,
+        });
+      }
+    });
+    return Array.from(map.values()).sort(
+      (a, b) => (b.latestCreatedAt ?? 0) - (a.latestCreatedAt ?? 0),
+    );
+  }, [stories]);
+  const storyRailData = useMemo<StoryRailEntry[]>(() => {
+    const entries: StoryRailEntry[] = [];
+    const myEntry =
+      (user?.uid ? groupedStories.find((entry) => entry.userId === user.uid) : null) ?? null;
+    const selfAvatar = user?.photoURL ?? myEntry?.displayAvatar ?? myEntry?.photoURL ?? null;
+    entries.push({
+      id: user?.uid ?? 'self-story',
+      userId: user?.uid ?? 'self-story',
+      username: user?.displayName ?? 'My Story',
+      photoURL: myEntry?.photoURL ?? selfAvatar ?? undefined,
+      userAvatar: selfAvatar,
+      latestStoryId: myEntry?.latestStoryId ?? null,
+      latestCreatedAt: myEntry?.latestCreatedAt ?? null,
+      hasStory: !!myEntry,
+      isSelf: true,
+      timestampLabel: myEntry?.latestCreatedAt
+        ? formatStoryTime(myEntry.latestCreatedAt)
+        : 'Tap to add',
+      displayAvatar: selfAvatar,
+    });
+    groupedStories
+      .filter((entry) => entry.userId !== user?.uid)
+      .forEach((entry) => {
+        entries.push({
+          ...entry,
+          id: entry.latestStoryId ?? entry.id,
+          hasStory: true,
+          timestampLabel: formatStoryTime(entry.latestCreatedAt),
+          displayAvatar: entry.displayAvatar ?? entry.photoURL ?? entry.avatar ?? null,
+        });
+      });
+    return entries;
+  }, [groupedStories, user?.uid, user?.displayName, user?.photoURL]);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthChange((currentUser) => {
@@ -315,6 +405,24 @@ const MessagingScreen = () => {
     router.push(path);
   };
 
+  const handleStoryPress = useCallback(
+    (story: StoryRailEntry) => {
+      if (story.isSelf && !story.hasStory) {
+        router.push('/story-upload');
+        return;
+      }
+      const targetId = story.latestStoryId || story.id;
+      router.push({
+        pathname: '/story/[id]',
+        params: {
+          id: targetId,
+          photoURL: story.photoURL ?? story.displayAvatar ?? '',
+        },
+      });
+    },
+    [router],
+  );
+
   const handleStartCall = useCallback(
     async (conversation: Conversation, mode: CallType) => {
       if (!user?.uid) {
@@ -425,7 +533,7 @@ const MessagingScreen = () => {
                 },
               ]}
             >
-            <MovieList title="Continue Watching" movies={continueWatching.slice(0, 20)} />
+            <MovieList title="Continue Watching" movies={continueWatching.slice(0, 20)} showProgress />
           </Animated.View>
         )}
       </View>
@@ -508,19 +616,11 @@ const MessagingScreen = () => {
                   </View>
 
                   <FlatList
-                    data={stories}
+                    data={storyRailData}
                     renderItem={({ item }) => (
                       <StoryItem
                         item={item}
-                        onPress={(story) =>
-                          router.push({
-                            pathname: '/story/[id]',
-                            params: {
-                              id: story.id,
-                              photoURL: story.avatar ?? '',
-                            },
-                          })
-                        }
+                        onPress={handleStoryPress}
                       />
                     )}
                     keyExtractor={(item, index) => `${item.id}-${index}`}

@@ -136,6 +136,7 @@ const HomeScreen: React.FC = () => {
   const [activeProfileName, setActiveProfileName] = useState<string | null>(null);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [isKidsProfile, setIsKidsProfile] = useState(false);
+  const [profileReady, setProfileReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [continueWatching, setContinueWatching] = useState<Media[]>([]);
@@ -275,18 +276,21 @@ const HomeScreen: React.FC = () => {
               setActiveProfileName(parsed.name);
               setActiveProfileId(typeof parsed.id === 'string' ? parsed.id : null);
               setIsKidsProfile(Boolean(parsed.isKids));
+              setProfileReady(true);
               return;
             }
           }
           setActiveProfileName(null);
           setActiveProfileId(null);
           setIsKidsProfile(false);
+          setProfileReady(true);
         } catch (err) {
           console.error('Failed to load active profile', err);
           if (isActive) {
             setActiveProfileName(null);
             setActiveProfileId(null);
             setIsKidsProfile(false);
+            setProfileReady(true);
           }
         }
       };
@@ -299,14 +303,20 @@ const HomeScreen: React.FC = () => {
     }, [])
   );
 
-  // Load simple watch history for "Continue Watching" and "Because you watched"
-  useEffect(() => {
-    let isMounted = true;
-    const loadHistory = async () => {
+  const loadWatchHistory = useCallback(() => {
+    let isActive = true;
+    const run = async () => {
+      if (!profileReady) {
+        if (isActive) {
+          setContinueWatching([]);
+          setLastWatched(null);
+        }
+        return;
+      }
       try {
         const key = buildProfileScopedKey('watchHistory', activeProfileId);
         const stored = await AsyncStorage.getItem(key);
-        if (!isMounted) return;
+        if (!isActive) return;
         if (stored) {
           const parsed: Media[] = JSON.parse(stored);
           setContinueWatching(parsed);
@@ -316,20 +326,23 @@ const HomeScreen: React.FC = () => {
           setLastWatched(null);
         }
       } catch (err) {
-        if (isMounted) {
+        if (isActive) {
           console.error('Failed to load watch history', err);
           setContinueWatching([]);
           setLastWatched(null);
         }
       }
     };
-    loadHistory();
+    run();
     return () => {
-      isMounted = false;
+      isActive = false;
     };
-  }, [activeProfileId]);
+  }, [activeProfileId, profileReady]);
+
+  useFocusEffect(loadWatchHistory);
 
   useEffect(() => {
+    if (!profileReady) return;
     const loadFromCache = async () => {
       try {
         const cached = await AsyncStorage.getItem(homeFeedCacheKey);
@@ -495,27 +508,14 @@ const HomeScreen: React.FC = () => {
     };
 
     init();
-  }, [fetchProviderMovies, fetchWithKids, homeFeedCacheKey, filterForKids]);
+  }, [fetchProviderMovies, fetchWithKids, homeFeedCacheKey, filterForKids, profileReady]);
 
   const handleOpenDetails = useCallback(
-    async (item: Media) => {
-      try {
-        const mediaType = (item.media_type || 'movie') as string;
-        router.push(`/details/${item.id}?mediaType=${mediaType}`);
-
-        const storageKey = buildProfileScopedKey('watchHistory', activeProfileId);
-        const stored = await AsyncStorage.getItem(storageKey);
-        const existing: Media[] = stored ? JSON.parse(stored) : [];
-        const deduped = existing.filter((m) => m.id !== item.id);
-        const updated = [item, ...deduped].slice(0, 20);
-        setContinueWatching(updated);
-        setLastWatched(item);
-        await AsyncStorage.setItem(storageKey, JSON.stringify(updated));
-      } catch (err) {
-        console.error('Failed to update watch history', err);
-      }
+    (item: Media) => {
+      const mediaType = (item.media_type || 'movie') as string;
+      router.push(`/details/${item.id}?mediaType=${mediaType}`);
     },
-    [router, activeProfileId]
+    [router]
   );
 
   const applyFilter = useCallback(
@@ -855,7 +855,12 @@ const HomeScreen: React.FC = () => {
 
                 {continueWatching.length > 0 && (
                   <View style={styles.sectionBlock}>
-                    <MovieList title="Continue Watching" movies={continueWatching} onItemPress={handleOpenDetails} />
+                    <MovieList
+                      title="Continue Watching"
+                      movies={continueWatching}
+                      onItemPress={handleOpenDetails}
+                      showProgress
+                    />
                   </View>
                 )}
 

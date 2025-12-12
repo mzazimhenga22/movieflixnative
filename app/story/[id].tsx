@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { firestore } from '../../constants/firebase';
 import { findOrCreateConversation, sendMessage, type Profile } from '../messaging/controller';
+import { useUser } from '../../hooks/use-user';
 
 interface StoryDoc {
   photoURL: string;
@@ -25,9 +26,11 @@ interface StoryDoc {
   overlayText?: string;
   userId?: string;
   createdAt?: any;
+  userAvatar?: string | null;
 }
 
 const StoryScreen = () => {
+  const { user } = useUser();
   const { id, photoURL: fallbackPhoto } = useLocalSearchParams();
   const router = useRouter();
   const [stories, setStories] = useState<(StoryDoc & { id: string })[]>([]);
@@ -38,6 +41,8 @@ const StoryScreen = () => {
   const { width } = Dimensions.get('window');
   const progressValueRef = useRef(0);
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const viewerId = (user as any)?.uid ?? null;
+  const STORY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
   useEffect(() => {
     const fetchStories = async () => {

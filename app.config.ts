@@ -7,14 +7,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const appIdFromEnv = process.env.EXPO_PUBLIC_AGORA_APP_ID ?? '';
   const tokenEndpointFromEnv = process.env.EXPO_PUBLIC_AGORA_TOKEN_ENDPOINT ?? '';
 
+  // We just reuse whatever plugins are defined in app.json.
+  // No Agora config plugin here, since it does not exist on npm.
   const mergedPlugins = [
     ...(baseExpoConfig.plugins ?? []),
-    [
-      '@config-plugins/react-native-agora',
-      {
-        appid: appIdFromEnv,
-      },
-    ],
+    // If in future you add a real Agora config plugin, you can push it here.
   ];
 
   return {

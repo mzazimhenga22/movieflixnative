@@ -19,9 +19,16 @@ interface MovieListProps {
   movies: Media[];
   carousel?: boolean; // Make carousel optional
   onItemPress?: (item: Media) => void;
+  showProgress?: boolean;
 }
 
-const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true, onItemPress }) => {
+const MovieList: React.FC<MovieListProps> = ({
+  title,
+  movies,
+  carousel = true,
+  onItemPress,
+  showProgress = false,
+}) => {
   const router = useRouter();
   const [myListIds, setMyListIds] = useState<number[]>([]);
 
@@ -68,7 +75,21 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true, o
     return null;
   }
 
-  const renderCarouselItem = ({ item }: { item: Media }) => (
+  const renderCarouselItem = ({ item }: { item: Media }) => {
+    const progressValue = showProgress ? item.watchProgress?.progress ?? null : null;
+    const normalizedProgress =
+      typeof progressValue === 'number' ? Math.min(Math.max(progressValue, 0), 1) : null;
+    const seasonLabel =
+      item.media_type === 'tv' && typeof item.seasonNumber === 'number'
+        ? `S${String(item.seasonNumber).padStart(2, '0')}`
+        : null;
+    const episodeLabel =
+      item.media_type === 'tv' && typeof item.episodeNumber === 'number'
+        ? `E${String(item.episodeNumber).padStart(2, '0')}`
+        : null;
+    const showEpisodeMeta = showProgress && item.media_type === 'tv' && (seasonLabel || episodeLabel);
+
+    return (
     <TouchableOpacity
       style={[styles.carouselMovieCard, styles.glassCard]}
       onPress={() => (onItemPress ? onItemPress(item) : handlePress(item.id, item.media_type))}
@@ -88,10 +109,16 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true, o
           color="#fff"
         />
       </TouchableOpacity>
-      <View style={styles.carouselMeta}>
+      <View style={[styles.carouselMeta, showProgress && styles.carouselMetaWithProgress]}>
         <Text style={styles.movieTitle} numberOfLines={1}>
           {item.title || item.name}
         </Text>
+        {showEpisodeMeta ? (
+          <Text style={styles.episodeBadgeText} numberOfLines={1}>
+            {[seasonLabel, episodeLabel].filter(Boolean).join(' • ')}
+            {item.episodeTitle ? `  ${item.episodeTitle}` : ''}
+          </Text>
+        ) : null}
         <View style={styles.pillRow}>
           <View style={styles.pill}>
             <Text style={styles.pillText}>HD</Text>
@@ -101,37 +128,85 @@ const MovieList: React.FC<MovieListProps> = ({ title, movies, carousel = true, o
           </View>
         </View>
       </View>
+      {showProgress && normalizedProgress && normalizedProgress > 0 ? (
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              {
+                width: `${normalizedProgress * 100}%`,
+              },
+            ]}
+          />
+        </View>
+      ) : null}
     </TouchableOpacity>
   );
+  };
 
-  const renderVerticalItem = (item: Media) => (
+  const renderVerticalItem = (item: Media) => {
+    const progressValue = showProgress ? item.watchProgress?.progress ?? null : null;
+    const normalizedProgress =
+      typeof progressValue === 'number' ? Math.min(Math.max(progressValue, 0), 1) : null;
+    const seasonLabel =
+      item.media_type === 'tv' && typeof item.seasonNumber === 'number'
+        ? `S${String(item.seasonNumber).padStart(2, '0')}`
+        : null;
+    const episodeLabel =
+      item.media_type === 'tv' && typeof item.episodeNumber === 'number'
+        ? `E${String(item.episodeNumber).padStart(2, '0')}`
+        : null;
+    const showEpisodeMeta = showProgress && item.media_type === 'tv' && (seasonLabel || episodeLabel);
+
+    return (
     <TouchableOpacity
       key={item.id}
       style={[styles.verticalMovieCard, styles.glassCard]}
       onPress={() => (onItemPress ? onItemPress(item) : handlePress(item.id, item.media_type))}
     >
-      <Image
-        source={{ uri: `${IMAGE_BASE_URL}${item.poster_path}` }}
-        style={styles.verticalMovieImage}
-      />
-      <TouchableOpacity
-        style={styles.myListButtonVertical}
-        onPress={() => toggleMyList(item)}
-      >
-        <Ionicons
-          name={myListIds.includes(item.id) ? 'checkmark' : 'add'}
-          size={18}
-          color="#fff"
+      <View style={styles.verticalImageWrap}>
+        <Image
+          source={{ uri: `${IMAGE_BASE_URL}${item.poster_path}` }}
+          style={styles.verticalMovieImage}
         />
-      </TouchableOpacity>
+        {showProgress && normalizedProgress && normalizedProgress > 0 ? (
+          <View style={styles.progressTrackVertical}>
+            <View
+              style={[
+                styles.progressFill,
+                {
+                  width: `${normalizedProgress * 100}%`,
+                },
+              ]}
+            />
+          </View>
+        ) : null}
+        <TouchableOpacity
+          style={styles.myListButtonVertical}
+          onPress={() => toggleMyList(item)}
+        >
+          <Ionicons
+            name={myListIds.includes(item.id) ? 'checkmark' : 'add'}
+            size={18}
+            color="#fff"
+          />
+        </TouchableOpacity>
+      </View>
       <View style={styles.verticalMovieInfo}>
         <Text style={styles.verticalMovieTitle}>{item.title || item.name}</Text>
+        {showEpisodeMeta ? (
+          <Text style={styles.episodeBadgeText} numberOfLines={1}>
+            {[seasonLabel, episodeLabel].filter(Boolean).join(' • ')}
+            {item.episodeTitle ? `  ${item.episodeTitle}` : ''}
+          </Text>
+        ) : null}
         <Text style={styles.verticalMovieOverview} numberOfLines={3}>
           {item.overview}
         </Text>
       </View>
     </TouchableOpacity>
   );
+  };
 
   return (
     <View style={styles.sectionContainer}>
@@ -227,6 +302,9 @@ const styles = StyleSheet.create({
     right: 8,
     gap: 6,
   },
+  carouselMetaWithProgress: {
+    bottom: 24,
+  },
   pillRow: {
     flexDirection: 'row',
     gap: 6,
@@ -247,6 +325,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+  episodeBadgeText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 11,
+    fontWeight: '600',
+  },
   // Vertical list-specific styles
   verticalListContainer: {
     paddingHorizontal: 16,
@@ -256,6 +339,10 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     borderRadius: 16,
     overflow: 'hidden',
+  },
+  verticalImageWrap: {
+    position: 'relative',
+    marginRight: 12,
   },
   verticalMovieImage: {
     width: 100,
@@ -310,6 +397,34 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.24)',
+  },
+  progressTrack: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 8,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.26)',
+    overflow: 'hidden',
+  },
+  progressTrackVertical: {
+    position: 'absolute',
+    left: 6,
+    right: 6,
+    bottom: 6,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.26)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 999,
+    backgroundColor: '#e50914',
   },
 });
 
