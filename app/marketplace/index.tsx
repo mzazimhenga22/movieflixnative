@@ -2,12 +2,12 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ProductCard from './components/ProductCard';
-import { useNavigation } from 'expo-router';
-import { getProducts, Product } from '../api';
+import { useRouter } from 'expo-router';
+import { getProducts, Product as APIProduct } from './api';
 
 export default function MarketplaceScreen() {
-  const navigation = useNavigation();
-  const [products, setProducts] = React.useState<Product[]>([]);
+  const router = useRouter();
+  const [products, setProducts] = React.useState<APIProduct[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
@@ -35,13 +35,20 @@ export default function MarketplaceScreen() {
     );
   }
 
+  // Filter out products without an id and narrow types for TS
+  const validProducts = products.filter((p): p is APIProduct & { id: string } => !!p.id);
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollViewContent}>
         <Text style={styles.header}>Explore the Marketplace</Text>
         <View style={styles.productsGrid}>
-          {products.map(product => (
-            <ProductCard key={product.id} product={product} onPress={() => navigation.navigate('marketplace/[id]', { id: product.id })} />
+          {validProducts.map(product => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              onPress={() => router.push((`/marketplace/${product.id}`) as any)}
+            />
           ))}
         </View>
       </ScrollView>
