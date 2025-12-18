@@ -32,6 +32,8 @@ export default function BottomNav({ insetsBottom, isDark, state, navigation }: P
         return focused ? 'search' : 'search-outline';
       case 'downloads':
         return focused ? 'download' : 'download-outline';
+      case 'marketplace':
+        return focused ? 'storefront' : 'storefront-outline';
       case 'interactive':
         return focused ? 'sparkles' : 'sparkles-outline';
       default:
@@ -49,6 +51,8 @@ export default function BottomNav({ insetsBottom, isDark, state, navigation }: P
         return 'Search';
       case 'downloads':
         return 'Downloads';
+      case 'marketplace':
+        return 'Marketplace';
       default:
         return routeName;
     }

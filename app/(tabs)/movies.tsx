@@ -28,6 +28,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAccentFromPosterPath } from '../../constants/theme';
 import { useAccent } from '../components/AccentContext';
 import { buildProfileScopedKey } from '../../lib/profileStorage';
+import { useSubscription } from '../../providers/SubscriptionProvider';
 
 const shuffleArray = <T,>(array: T[] | undefined): T[] => {
   if (!array) return [];
@@ -119,6 +120,7 @@ const LoadingSkeleton = () => (
 );
 
 const HomeScreen: React.FC = () => {
+  const { currentPlan } = useSubscription();
   const [trending, setTrending] = useState<Media[]>([]);
   const [movieReels, setMovieReels] = useState<Media[]>([]);
   const [recommended, setRecommended] = useState<Media[]>([]);
@@ -143,6 +145,7 @@ const HomeScreen: React.FC = () => {
   const [lastWatched, setLastWatched] = useState<Media | null>(null);
   const [activeFilter, setActiveFilter] = useState<'All' | 'TopRated' | 'New' | 'ForYou'>('All');
   const [activeGenreId, setActiveGenreId] = useState<number | null>(null);
+  const [fabExpanded, setFabExpanded] = useState(false);
 
   const router = useRouter();
   const [previewVisible, setPreviewVisible] = useState(false);
@@ -760,6 +763,33 @@ const HomeScreen: React.FC = () => {
             </View>
           </View>
 
+          {currentPlan === 'free' && (
+            <View style={styles.upgradeBanner}>
+              <LinearGradient
+                colors={['rgba(229,9,20,0.9)', 'rgba(185,7,16,0.9)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.upgradeBannerGradient}
+              >
+                <View style={styles.upgradeBannerContent}>
+                  <Ionicons name="star" size={20} color="#fff" />
+                  <View style={styles.upgradeBannerText}>
+                    <Text style={styles.upgradeBannerTitle}>Upgrade to Plus</Text>
+                    <Text style={styles.upgradeBannerSubtitle}>
+                      Unlock unlimited profiles, premium features & more
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.upgradeBannerButton}
+                    onPress={() => router.push('/premium?source=movies')}
+                  >
+                    <Text style={styles.upgradeBannerButtonText}>Upgrade</Text>
+                  </TouchableOpacity>
+                </View>
+              </LinearGradient>
+            </View>
+          )}
+
             <ScrollView contentContainerStyle={styles.scrollViewContent}>
               {stories.length === 0 && recommended.length === 0 && trending.length === 0 ? (
                 <View style={styles.centered}>
@@ -971,8 +1001,54 @@ const HomeScreen: React.FC = () => {
             )}
           </ScrollView>
 
-            <TouchableOpacity style={styles.fab} onPress={handleShuffle}>
-              <Ionicons name="shuffle" size={24} color="#FFFFFF" />
+            {/* Sub FABs */}
+            {fabExpanded && (
+              <>
+                <TouchableOpacity
+                  style={[styles.subFab, { bottom: 300 }]}
+                  onPress={() => {
+                    handleShuffle();
+                    setFabExpanded(false);
+                  }}
+                >
+                  <Ionicons name="shuffle" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.subFab, { bottom: 240 }]}
+                  onPress={() => {
+                    router.push('/messaging');
+                    setFabExpanded(false);
+                  }}
+                >
+                  <Ionicons name="chatbubble-outline" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.subFab, { bottom: 360 }]}
+                  onPress={() => {
+                    router.push('/watchparty');
+                    setFabExpanded(false);
+                  }}
+                >
+                  <Ionicons name="people-outline" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.subFab, { bottom: 420 }]}
+                  onPress={() => {
+                    router.push('/social-feed');
+                    setFabExpanded(false);
+                  }}
+                >
+                  <Ionicons name="heart-outline" size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* Main FAB */}
+            <TouchableOpacity
+              style={[styles.fab, { bottom: 120 }]}
+              onPress={() => setFabExpanded(!fabExpanded)}
+            >
+              <Ionicons name="add" size={24} color="#FFFFFF" />
             </TouchableOpacity>
 
             {previewVisible && featuredMovie && (
@@ -1071,7 +1147,7 @@ const HomeScreen: React.FC = () => {
   // Header glass hero
   headerWrap: {
     marginHorizontal: 12,
-    marginTop: Platform.OS === 'ios' ? 56 : 26,
+    marginTop: Platform.OS === 'ios' ? 80 : 50,
     marginBottom: 6,
     borderRadius: 18,
     overflow: 'hidden',
@@ -1363,6 +1439,21 @@ const HomeScreen: React.FC = () => {
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
   },
+  subFab: {
+    position: 'absolute',
+    width: 64,
+    height: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+    right: 18,
+    backgroundColor: '#e50914',
+    borderRadius: 32,
+    elevation: 10,
+    shadowColor: '#e50914',
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+  },
 
   centered: {
     flex: 1,
@@ -1519,6 +1610,44 @@ const HomeScreen: React.FC = () => {
   },
   skeletonListRow: {
     paddingVertical: 10,
+  },
+  upgradeBanner: {
+    marginHorizontal: 12,
+    marginBottom: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  upgradeBannerGradient: {
+    padding: 16,
+  },
+  upgradeBannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  upgradeBannerText: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  upgradeBannerTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  upgradeBannerSubtitle: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  upgradeBannerButton: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  upgradeBannerButtonText: {
+    color: '#e50914',
+    fontWeight: '700',
+    fontSize: 13,
   },
   });
 

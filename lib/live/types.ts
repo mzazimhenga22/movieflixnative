@@ -15,6 +15,7 @@ export type LiveStream = {
   endedAt?: Timestamp;
   updatedAt?: Timestamp;
   endedBy?: string | null;
+  signaling?: any; // WebRTC signaling data
 };
 
 export type CreateLiveStreamOptions = {
@@ -27,6 +28,4 @@ export type CreateLiveStreamOptions = {
 export type LiveStreamSession = {
   streamId: string;
   channelName: string;
-  token: string;
-  agoraUid: number;
 };

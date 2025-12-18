@@ -9,9 +9,10 @@ interface FeatureCardProps {
   description: string;
   onPress?: () => void;
   isLarge?: boolean;
+  iconColor?: string; // New prop for icon color
 }
 
-const FeatureCard: React.FC<FeatureCardProps> = ({ iconName, title, description, onPress, isLarge = false }) => {
+const FeatureCard: React.FC<FeatureCardProps> = ({ iconName, title, description, onPress, isLarge = false, iconColor = '#ffffff' }) => {
   return (
     <TouchableOpacity
       style={[styles.card, isLarge && styles.largeCard]}
@@ -27,7 +28,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ iconName, title, description,
       {isLarge ? (
         <>
           <View style={[styles.iconContainer, styles.largeIconContainer]}>
-            <MaterialCommunityIcons name={iconName} size={40} color="#ffffff" />
+            <MaterialCommunityIcons name={iconName} size={40} color={iconColor} />
           </View>
           <View style={styles.textContainer}>
             <Text style={[styles.title, styles.largeTitle]}>{title}</Text>
@@ -37,7 +38,7 @@ const FeatureCard: React.FC<FeatureCardProps> = ({ iconName, title, description,
       ) : (
         <>
           <View style={styles.iconContainer}>
-            <MaterialCommunityIcons name={iconName} size={30} color="#ffffff" />
+            <MaterialCommunityIcons name={iconName} size={30} color={iconColor} />
           </View>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.description}>{description}</Text>

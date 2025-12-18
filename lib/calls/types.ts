@@ -16,21 +16,25 @@ export type CallParticipant = {
   id: string;
   displayName?: string | null;
   state: CallParticipantState;
-  agoraUid?: number;
   mutedAudio?: boolean;
   mutedVideo?: boolean;
   joinedAt?: Timestamp;
   leftAt?: Timestamp;
 };
 
-export type CallTokens = Record<
-  string,
-  {
-    token: string;
-    agoraUid: number;
-    issuedAt?: Timestamp;
-  }
->;
+export type IceCandidateData = {
+  candidate: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+};
+
+export type SignalingData = {
+  offer?: RTCSessionDescription;
+  answer?: RTCSessionDescription;
+  iceCandidates?: IceCandidateData[];
+};
+
+export type CallSignaling = Record<string, SignalingData>;
 
 export type CallSession = {
   id: string;
@@ -48,7 +52,7 @@ export type CallSession = {
   endedAt?: Timestamp;
   endedBy?: string | null;
   participants?: Record<string, CallParticipant>;
-  tokens?: CallTokens;
+  signaling?: CallSignaling;
 };
 
 export type CreateCallOptions = {

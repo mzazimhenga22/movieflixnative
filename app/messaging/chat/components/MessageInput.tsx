@@ -1,17 +1,19 @@
-import React, { useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Audio } from 'expo-av';
+import * as ImagePicker from 'expo-image-picker';
+import React, { useRef, useState } from 'react';
 import {
-  View,
+  Alert,
+  Animated,
+  Keyboard,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  Platform,
-  Keyboard,
-  Alert,
-  ScrollView,
+  Vibration,
+  View
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
 
 interface MessageInputProps {
   onSendMessage: (message: string) => void;
@@ -37,6 +39,13 @@ const MessageInput = ({
   const [message, setMessage] = useState('');
   const [showEmojis, setShowEmojis] = useState(false);
   const [showAttachSheet, setShowAttachSheet] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const typingTimerRef = React.useRef<number | null>(null);
+  const isTypingRef = React.useRef(false);
+  const recordingTimerRef = React.useRef<number | null>(null);
+  const waveAnimations = useRef(Array.from({ length: 5 }, () => new Animated.Value(1))).current;
 
   const hasText = message.trim().length > 0;
 
@@ -46,18 +55,151 @@ const MessageInput = ({
     if (!text) return;
     onSendMessage(text);
     setMessage('');
+    if (typingTimerRef.current) {
+      clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = null;
+    }
+    isTypingRef.current = false;
     onTypingChange?.(false);
     Keyboard.dismiss();
   };
 
   const handleChange = (text: string) => {
     setMessage(text);
-    onTypingChange?.(!!text.trim());
+    const hasTextNow = !!text.trim();
+
+    if (hasTextNow && !isTypingRef.current) {
+      isTypingRef.current = true;
+      onTypingChange?.(true);
+    }
+
+    if (typingTimerRef.current) {
+      clearTimeout(typingTimerRef.current);
+    }
+
+    // debounce stop typing after 1200ms of inactivity
+    typingTimerRef.current = (setTimeout(() => {
+      isTypingRef.current = false;
+      typingTimerRef.current = null;
+      onTypingChange?.(false);
+    }, 1200) as unknown) as number;
+  };
+
+  // Audio recording functions
+  const startRecording = async () => {
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Allow microphone access to record voice messages.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
+      const { recording: newRecording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+
+      setRecording(newRecording);
+      setIsRecording(true);
+      setRecordingDuration(0);
+
+      // Start wave animations
+      startWaveAnimations();
+
+      // Start duration timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingDuration(prev => prev + 1);
+      }, 1000);
+
+      // Haptic feedback
+      Vibration.vibrate(50);
+
+    } catch (err) {
+      console.error('Failed to start recording', err);
+      Alert.alert('Recording failed', 'Unable to start voice recording.');
+    }
+  };
+
+  const stopRecording = async () => {
+    if (!recording) return;
+
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+
+      if (uri && recordingDuration >= 1) {
+        // Send the audio message
+        if (onPickAudio) {
+          onPickAudio(uri);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to stop recording', err);
+    } finally {
+      setRecording(null);
+      setIsRecording(false);
+      setRecordingDuration(0);
+      stopWaveAnimations();
+
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+    }
+  };
+
+  const startWaveAnimations = () => {
+    const animateWave = (index: number) => {
+      Animated.sequence([
+        Animated.timing(waveAnimations[index], {
+          toValue: 1.5 + Math.random() * 0.5,
+          duration: 300 + Math.random() * 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(waveAnimations[index], {
+          toValue: 1,
+          duration: 300 + Math.random() * 200,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        if (isRecording) {
+          animateWave(index);
+        }
+      });
+    };
+
+    waveAnimations.forEach((_, index) => {
+      setTimeout(() => animateWave(index), index * 100);
+    });
+  };
+
+  const stopWaveAnimations = () => {
+    waveAnimations.forEach((anim) => {
+      anim.setValue(1);
+    });
   };
 
   const handleMic = () => {
     if (disabled) return;
-    console.log('Mic pressed');
+
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
   };
 
   const handleRightPress = () => {
@@ -122,6 +264,15 @@ const MessageInput = ({
     }
     Keyboard.dismiss();
   };
+
+  React.useEffect(() => {
+    return () => {
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current as unknown as number);
+        typingTimerRef.current = null;
+      }
+    };
+  }, []);
 
   return (
     <View style={styles.outer}>
@@ -235,111 +386,203 @@ const MessageInput = ({
           </ScrollView>
         </View>
       )}
+
+      {isRecording && (
+        <View style={styles.recordingOverlay}>
+          <View style={styles.recordingContainer}>
+            <View style={styles.waveContainer}>
+              {waveAnimations.map((anim, index) => (
+                <Animated.View
+                  key={index}
+                  style={[
+                    styles.waveBar,
+                    {
+                      transform: [{ scaleY: anim }],
+                      backgroundColor: '#ff4b4b',
+                    },
+                  ]}
+                />
+              ))}
+            </View>
+            <View style={styles.recordingInfo}>
+              <Ionicons name="mic" size={24} color="#ff4b4b" />
+              <Text style={styles.recordingText}>
+                Recording... {recordingDuration}s
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.stopRecordingButton}
+              onPress={stopRecording}
+            >
+              <Ionicons name="stop" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   outer: {
-    paddingHorizontal: 12,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 12,
-    backgroundColor: 'transparent',
+    backgroundColor: '#1a1a1a',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  replyBar: {
+    backgroundColor: '#2a2a2a',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  replyLabel: {
+    color: '#f5f5f5',
+    fontSize: 14,
   },
   container: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Platform.OS === 'ios' ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.02)',
-    borderRadius: 14,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#1a1a1a',
+    minHeight: 56,
   },
   disabledContainer: {
-    backgroundColor: 'rgba(255,255,255,0.01)',
+    opacity: 0.5,
   },
   iconButton: {
-    marginRight: 6,
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   plusButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginRight: 8,
   },
   input: {
     flex: 1,
+    color: '#f5f5f5',
+    fontSize: 16,
     maxHeight: 120,
-    color: 'white',
-    fontSize: 15,
-    paddingHorizontal: 6,
-    paddingVertical: 6,
+    minHeight: 20,
+    paddingVertical: 4,
+    marginHorizontal: 8,
   },
   sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#4D8DFF',
-    borderRadius: 999,
-    width: 44,
-    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
   },
   disabledSendButton: {
-    backgroundColor: '#9e9e9e',
-  },
-  replyBar: {
-    marginBottom: 4,
-    paddingHorizontal: 4,
-  },
-  replyLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
+    backgroundColor: '#333',
   },
   emojiKeyboard: {
-    marginTop: 6,
-    paddingHorizontal: 6,
-    maxHeight: 220,
+    backgroundColor: '#2a2a2a',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    maxHeight: 200,
   },
   emojiScrollContent: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    padding: 16,
+  },
+  emojiButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    margin: 4,
+    borderRadius: 8,
+  },
+  emojiText: {
+    fontSize: 24,
   },
   attachSheet: {
-    marginTop: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    borderRadius: 16,
+    backgroundColor: '#2a2a2a',
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    paddingVertical: 16,
   },
   attachScrollContent: {
+    paddingHorizontal: 16,
     alignItems: 'center',
   },
   attachItem: {
     alignItems: 'center',
-    marginRight: 14,
+    marginRight: 24,
   },
   attachIconCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#4D8DFF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   attachLabel: {
+    color: '#f5f5f5',
     fontSize: 12,
-    color: 'rgba(255,255,255,0.85)',
+    textAlign: 'center',
   },
-  emojiButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 4,
+  recordingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  emojiText: {
-    fontSize: 20,
+  recordingContainer: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 16,
+    padding: 24,
+    alignItems: 'center',
+    minWidth: 280,
+  },
+  waveContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 60,
+    marginBottom: 16,
+  },
+  waveBar: {
+    width: 4,
+    height: 40,
+    marginHorizontal: 2,
+    borderRadius: 2,
+  },
+  recordingInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  recordingText: {
+    color: '#f5f5f5',
+    fontSize: 16,
+    marginLeft: 8,
+  },
+  stopRecordingButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#ff4b4b',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

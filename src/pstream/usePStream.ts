@@ -1,35 +1,21 @@
-import { useState, useCallback } from 'react';
-import { Buffer } from 'buffer';
+import { useCallback, useState } from 'react';
 import type {
   ProviderControls,
+  Qualities,
   RunOutput,
   ScrapeMedia,
   Stream,
-  Qualities,
 } from '../../providers-temp/lib/index.js';
-
-if (typeof globalThis.Buffer === 'undefined') {
-  (globalThis as any).Buffer = Buffer;
-}
-
-const bufferProto = (globalThis.Buffer as any)?.prototype ?? (Buffer.prototype as any);
-if (bufferProto && !bufferProto.__base64UrlPolyfillApplied) {
-  const originalToString = bufferProto.toString;
-  bufferProto.toString = function patchedToString(encoding?: string, start?: number, end?: number) {
-    if (encoding === 'base64url') {
-      const base64 = originalToString.call(this, 'base64', start, end);
-      return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-    }
-    return originalToString.call(this, encoding, start, end);
-  };
-  bufferProto.__base64UrlPolyfillApplied = true;
-}
+import { flags } from '../../providers-temp/lib/index.js';
 
 const {
   makeProviders,
   makeStandardFetcher,
   targets,
+  setupProxy,
 } = require('../../providers-temp/lib/index.js') as typeof import('../../providers-temp/lib/index.js');
+
+/* ───────── TYPES ───────── */
 
 export type PStreamPlayback = {
   uri: string;
@@ -39,11 +25,44 @@ export type PStreamPlayback = {
   embedId?: string;
 };
 
+type Embed = {
+  id: string;
+  embedScraperId: string;
+};
+
+type RunOutputWithEmbeds = RunOutput & { embeds?: Embed[] };
+
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
-const fetchLike: FetchLike = (url, init) => fetch(url, init);
+/* ───────── FETCHER ───────── */
+
+const fetchLike: FetchLike = async (url, init) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        Referer: 'https://www.google.com/',
+        ...(init?.headers as Record<string, string>),
+      },
+    });
+    clearTimeout(timeout);
+    return res;
+  } catch (e) {
+    clearTimeout(timeout);
+    throw e;
+  }
+};
 
 const sharedFetcher = makeStandardFetcher(fetchLike as any);
+
+/* ───────── PROVIDERS ───────── */
 
 let cachedProviders: ProviderControls | null = null;
 
@@ -61,112 +80,130 @@ function getProviders(): ProviderControls {
   return cachedProviders;
 }
 
+/* ───────── STREAM HELPERS ───────── */
+
 const QUALITY_ORDER: Qualities[] = ['4k', '1080', '720', '480', '360', 'unknown'];
 
-function mergeStreamHeaders(stream: Stream): Record<string, string> | undefined {
-  const headers = {
-    ...(stream.headers ?? {}),
-    ...(stream.preferredHeaders ?? {}),
-  };
-  const keys = Object.keys(headers);
-  return keys.length > 0 ? headers : undefined;
+function mergeHeaders(stream: Stream) {
+  const h = { ...(stream.headers ?? {}), ...(stream.preferredHeaders ?? {}) };
+  return Object.keys(h).length ? h : undefined;
 }
 
 function pickFileQuality(stream: Stream): string | null {
   if (stream.type !== 'file') return null;
-  for (const quality of QUALITY_ORDER) {
-    const candidate = stream.qualities?.[quality];
-    if (candidate?.url) return candidate.url;
+  for (const q of QUALITY_ORDER) {
+    const f = stream.qualities?.[q];
+    if (f?.url) return f.url;
   }
-  const fallback = Object.values(stream.qualities ?? {}).find((file) => file?.url);
-  return fallback?.url ?? null;
+  return Object.values(stream.qualities ?? {}).find(v => v?.url)?.url ?? null;
 }
 
-function buildPlayback(output: RunOutput): PStreamPlayback {
-  const { stream } = output;
+function buildPlayback(stream: Stream, sourceId: string, embedId?: string): PStreamPlayback {
   let uri: string | null = null;
+  let headers = mergeHeaders(stream);
+
   if (stream.type === 'hls') {
     uri = stream.playlist;
-  } else {
+  } else if (stream.type === 'file') {
     uri = pickFileQuality(stream);
+    if (stream.flags && (!stream.flags.includes(flags.CORS_ALLOWED) || headers)) {
+      const proxied = setupProxy({ ...stream });
+      uri = pickFileQuality(proxied);
+      headers = undefined;
+    }
   }
-  if (!uri) throw new Error('No playable stream returned');
-  return {
-    uri,
-    headers: mergeStreamHeaders(stream),
-    stream,
-    sourceId: output.sourceId,
-    embedId: output.embedId,
-  };
+
+  if (!uri) throw new Error('No playable stream');
+
+  return { uri, headers, stream, sourceId, embedId };
 }
 
-type ScrapeOptions = {
-  sourceOrder?: string[];
-  debugTag?: string;
-};
+/* ───────── LANGUAGE PRIORITY ───────── */
 
-const createDebugEvents = (tag: string, suffix?: string) => {
-  const label = suffix ? `${tag} ${suffix}` : tag;
-  return {
-    init(evt: any) {
-      console.log(`[PStream] ${label} :: init`, evt.sourceIds);
-    },
-    start(id: string) {
-      console.log(`[PStream] ${label} :: start`, id);
-    },
-    discoverEmbeds(evt: any) {
-      console.log(`[PStream] ${label} :: embeds`, evt);
-    },
-    update(evt: any) {
-      if (evt.status === 'failure') {
-        console.warn(`[PStream] ${label} :: ${evt.id} failed`, evt.error);
-      } else if (evt.status === 'notfound') {
-        console.log(`[PStream] ${label} :: ${evt.id} not found`, evt.reason);
-      } else if (evt.status === 'success') {
-        console.log(`[PStream] ${label} :: ${evt.id} success`);
-      }
-    },
-  };
-};
+function isEnglish(embedId?: string) {
+  const id = embedId?.toLowerCase() ?? '';
+  return id.includes('english') || id.includes('eng') || id.includes('en');
+}
+
+function orderEmbedsEnglishFirst(embeds: Embed[]): Embed[] {
+  const english: Embed[] = [];
+  const rest: Embed[] = [];
+  for (const e of embeds) (isEnglish(e.embedScraperId) ? english : rest).push(e);
+  return [...english, ...rest];
+}
+
+/* ───────── FALLBACK SOURCES ───────── */
+
+const FALLBACK_SOURCES = ['cuevana3', 'ridomovies', 'hdrezka', 'warezcdn'];
+
+/* ───────── HOOK ───────── */
 
 export function usePStream() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PStreamPlayback | null>(null);
 
-  const scrape = useCallback(async (media: ScrapeMedia, options?: ScrapeOptions): Promise<PStreamPlayback> => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const providers = getProviders();
-      const executeRun = async (order?: string[], debugSuffix?: string) =>
-        providers.runAll({
-          media,
-          disableOpensubtitles: true,
-          ...(order?.length ? { sourceOrder: order } : {}),
-          ...(options?.debugTag ? { events: createDebugEvents(options.debugTag, debugSuffix) } : {}),
-        });
+  const scrape = useCallback(
+    async (media: ScrapeMedia, options?: { sourceOrder?: string[]; debugTag?: string }) => {
+      setLoading(true);
+      setError(null);
+      setResult(null);
 
-      let runResult = await executeRun(options?.sourceOrder, '(preferred)');
-      if (!runResult && options?.sourceOrder?.length) {
-        console.warn('[PStream] Preferred source order returned nothing. Retrying default order.');
-        runResult = await executeRun(undefined, '(default)');
+      try {
+        const providers = getProviders();
+        const sourceOrder = options?.sourceOrder || FALLBACK_SOURCES;
+
+        if (options?.debugTag) console.log('[PStream]', options.debugTag, media);
+
+        for (const sourceId of sourceOrder) {
+          const discovery: RunOutputWithEmbeds | null = await providers.runAll({
+            media,
+            sourceOrder: [sourceId],
+            disableOpensubtitles: true,
+          });
+
+          if (!discovery) continue;
+
+          /* 1️⃣ MAIN STREAM */
+          if (discovery.stream) {
+            try {
+              const playback = buildPlayback(discovery.stream, sourceId);
+              setResult(playback);
+              return playback;
+            } catch {}
+          }
+
+          /* 2️⃣ EMBEDS */
+          const embeds = orderEmbedsEnglishFirst(discovery.embeds ?? []);
+          for (const embed of embeds) {
+            try {
+              const embedRun = await providers.runAll({
+                media,
+                sourceOrder: [sourceId],
+                embedId: embed.id,
+                disableOpensubtitles: true,
+              });
+              if (embedRun?.stream) {
+                const playback = buildPlayback(embedRun.stream, sourceId, embed.id);
+                setResult(playback);
+                return playback;
+              }
+            } catch {
+              console.warn('[PStream] Embed failed:', embed.embedScraperId);
+            }
+          }
+        }
+
+        throw new Error('No playable stream found');
+      } catch (e: any) {
+        setError(e?.message ?? 'Stream error');
+        throw e;
+      } finally {
+        setLoading(false);
       }
-      if (!runResult) {
-        throw new Error('No providers returned a playable stream.');
-      }
-      const playable = buildPlayback(runResult);
-      setResult(playable);
-      return playable;
-    } catch (err: any) {
-      const message = String(err?.message || err);
-      setError(message);
-      throw new Error(message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   return { loading, error, result, scrape };
 }

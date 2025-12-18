@@ -1,4 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+// app/reels/[...]/player.tsx (or wherever your ReelPlayerScreen lives)
+// ✅ Fixes Maximum update depth issues (stable params + safe index sync)
+// ✅ Adds TikTok-style double-tap like + heart burst
+// ✅ Single tap toggles mute
+// ✅ Adds right-side avatar + plus button that navigates to the poster profile screen
+//    (expects posterUserId/posterAvatar/posterName in the list payload; falls back gracefully)
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View,
   StyleSheet,
@@ -9,61 +16,90 @@ import {
   Alert,
   FlatList,
   StatusBar,
-} from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import YoutubePlayer from 'react-native-youtube-iframe';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { API_BASE_URL, API_KEY } from '../../constants/api';
-import { getAccentFromPosterPath } from '../../constants/theme';
+  Pressable,
+  Animated,
+  Easing,
+  Image,
+  ViewToken,
+  Platform,
+} from 'react-native'
+import { useLocalSearchParams, useRouter } from 'expo-router'
+import YoutubePlayer from 'react-native-youtube-iframe'
+import { LinearGradient } from 'expo-linear-gradient'
+import { Ionicons } from '@expo/vector-icons'
+import { API_BASE_URL, API_KEY } from '../../constants/api'
+import { getAccentFromPosterPath } from '../../constants/theme'
+import { useUser } from '../../hooks/use-user'
+import { useActiveProfilePhoto } from '../../hooks/use-active-profile-photo'
 
 type VideoResult = {
-  key: string;
-  site: string;
-  type: string;
-  name: string;
-};
+  key: string
+  site: string
+  type: string
+  name: string
+}
 
 type ReelItem = {
-  id: number;
-  mediaType: string;
-  title: string;
-  posterPath?: string | null;
-};
+  id: number
+  mediaType: string
+  title: string
+  posterPath?: string | null
 
-const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+  // ✅ poster profile navigation (optional)
+  posterUserId?: string | null
+  posterAvatar?: string | null
+  posterName?: string | null
+
+  // (optional display stats; not persisted here)
+  likes?: number
+}
+
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window')
 
 // We keep 16:9 but crop horizontally inside a 9:16 fullscreen container
-const VIDEO_HEIGHT = SCREEN_HEIGHT;
-const VIDEO_WIDTH = (SCREEN_HEIGHT * 16) / 9;
+const VIDEO_HEIGHT = SCREEN_HEIGHT
+const VIDEO_WIDTH = (SCREEN_HEIGHT * 16) / 9
+
+const FALLBACK_AVATAR =
+  'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&q=80&w=1780&ixlib=rb-4.0.3'
 
 const ReelPlayerScreen = () => {
-  const params = useLocalSearchParams();
-  const router = useRouter();
-  const { id, mediaType, title, list } = params;
+  const router = useRouter()
+  const params = useLocalSearchParams()
+
+  // ✅ Extract stable primitives (prevents “queue changes every render” loops)
+  const id = typeof params.id === 'string' ? params.id : undefined
+  const mediaType = typeof params.mediaType === 'string' ? params.mediaType : undefined
+  const title = typeof params.title === 'string' ? params.title : undefined
+  const list = typeof params.list === 'string' ? params.list : undefined
 
   // Hide status bar for full immersive feel
   useEffect(() => {
-    StatusBar.setHidden(true, 'fade');
-    return () => {
-      StatusBar.setHidden(false, 'fade');
-    };
-  }, []);
+    StatusBar.setHidden(true, 'fade')
+    return () => StatusBar.setHidden(false, 'fade')
+  }, [])
 
   const queue: ReelItem[] = useMemo(() => {
-    if (typeof list === 'string') {
+    if (typeof list === 'string' && list.length > 0) {
       try {
-        const parsed = JSON.parse(decodeURIComponent(list));
+        const parsed = JSON.parse(decodeURIComponent(list))
         if (Array.isArray(parsed)) {
-          return parsed.slice(0, 30).map((item) => ({
-            id: Number(item.id),
-            mediaType: (item.mediaType || 'movie') as string,
-            title: item.title || 'Reel',
-            posterPath: item.posterPath || item.poster_path || null,
-          }));
+          return parsed.slice(0, 30).map((it: any) => ({
+            id: Number(it.id),
+            mediaType: String(it.mediaType || it.media_type || 'movie'),
+            title: String(it.title || it.name || 'Reel'),
+            posterPath: it.posterPath || it.poster_path || null,
+
+            // ✅ optional poster fields from list
+            posterUserId: typeof it.posterUserId === 'string' ? it.posterUserId : null,
+            posterAvatar: typeof it.posterAvatar === 'string' ? it.posterAvatar : null,
+            posterName: typeof it.posterName === 'string' ? it.posterName : null,
+
+            likes: typeof it.likes === 'number' ? it.likes : 0,
+          }))
         }
       } catch (e) {
-        console.warn('Failed to parse reel queue', e);
+        console.warn('Failed to parse reel queue', e)
       }
     }
 
@@ -71,60 +107,61 @@ const ReelPlayerScreen = () => {
       return [
         {
           id: Number(id),
-          mediaType: mediaType as string,
-          title: (title as string) || 'Reel',
+          mediaType: String(mediaType),
+          title: String(title || 'Reel'),
+          posterPath: null,
+          posterUserId: null,
+          posterAvatar: null,
+          posterName: null,
+          likes: 0,
         },
-      ];
+      ]
     }
 
-    return [];
-  }, [id, mediaType, title, list]);
+    return []
+  }, [id, mediaType, title, list])
 
   const initialIndex = useMemo(() => {
-    const idx = queue.findIndex((item) => String(item.id) === String(id));
-    return idx >= 0 ? idx : 0;
-  }, [queue, id]);
+    const idx = queue.findIndex((it) => String(it.id) === String(id))
+    return idx >= 0 ? idx : 0
+  }, [queue, id])
 
-  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+  const [currentIndex, setCurrentIndex] = useState(initialIndex)
 
+  // ✅ Only update if it actually changed (prevents extra renders)
   useEffect(() => {
-    setCurrentIndex(initialIndex);
-  }, [initialIndex]);
+    setCurrentIndex((prev) => (prev === initialIndex ? prev : initialIndex))
+  }, [initialIndex])
 
-  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current;
-  const listRef = useRef<FlatList<ReelItem> | null>(null);
+  const listRef = useRef<FlatList<ReelItem> | null>(null)
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 80 }).current
 
-  const onViewableItemsChanged = useRef(({ viewableItems }: any) => {
-    if (viewableItems?.length > 0) {
-      const first = viewableItems[0]?.index;
-      if (typeof first === 'number') {
-        setCurrentIndex(first);
-      }
-    }
-  }).current;
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: Array<ViewToken> }) => {
+    const first = viewableItems?.[0]?.index
+    if (typeof first === 'number') setCurrentIndex(first)
+  }).current
 
-  const currentItem = queue[currentIndex];
-  const accentColor = getAccentFromPosterPath(currentItem?.posterPath);
+  const currentItem = queue[currentIndex]
+  const accentColor = getAccentFromPosterPath(currentItem?.posterPath)
 
-  const openDetails = () => {
-    if (!currentItem) return;
-    router.replace(`/details/${currentItem.id}?mediaType=${currentItem.mediaType}`);
-  };
+  const openDetails = useCallback(() => {
+    if (!currentItem) return
+    router.replace(`/details/${currentItem.id}?mediaType=${currentItem.mediaType}`)
+  }, [currentItem, router])
 
   return (
     <View style={styles.wrapper}>
-      <LinearGradient
-        colors={[accentColor, 'rgba(5,6,15,0.6)']}
-        style={StyleSheet.absoluteFillObject}
-      />
+      <LinearGradient colors={[accentColor, 'rgba(5,6,15,0.6)']} style={StyleSheet.absoluteFillObject} />
 
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={26} color="#fff" />
         </TouchableOpacity>
+
         <Text style={styles.title} numberOfLines={1}>
           {currentItem?.title || 'Reel'}
         </Text>
+
         <TouchableOpacity onPress={openDetails} style={styles.moreButton}>
           <Ionicons name="open-outline" size={24} color="#fff" />
         </TouchableOpacity>
@@ -134,21 +171,7 @@ const ReelPlayerScreen = () => {
         ref={listRef}
         style={{ flex: 1 }}
         data={queue}
-        keyExtractor={(item) => item.id.toString()}
-        renderItem={({ item, index }) => (
-          <ReelSlide
-            item={item}
-            active={index === currentIndex}
-            onOpenDetails={openDetails}
-            onAutoPlayNext={() => {
-              const nextIndex = index + 1;
-              if (index === currentIndex && nextIndex < queue.length) {
-                setCurrentIndex(nextIndex);
-                listRef.current?.scrollToIndex({ index: nextIndex, animated: true });
-              }
-            }}
-          />
-        )}
+        keyExtractor={(item) => String(item.id)}
         pagingEnabled
         showsVerticalScrollIndicator={false}
         snapToAlignment="start"
@@ -160,10 +183,25 @@ const ReelPlayerScreen = () => {
           offset: SCREEN_HEIGHT * index,
           index,
         })}
+        initialScrollIndex={initialIndex}
+        renderItem={({ item, index }) => (
+          <ReelSlide
+            item={item}
+            active={index === currentIndex}
+            onOpenDetails={openDetails}
+            onAutoPlayNext={() => {
+              const nextIndex = index + 1
+              if (index === currentIndex && nextIndex < queue.length) {
+                setCurrentIndex(nextIndex)
+                listRef.current?.scrollToIndex({ index: nextIndex, animated: true })
+              }
+            }}
+          />
+        )}
       />
     </View>
-  );
-};
+  )
+}
 
 const ReelSlide = ({
   item,
@@ -171,77 +209,150 @@ const ReelSlide = ({
   onOpenDetails,
   onAutoPlayNext,
 }: {
-  item: ReelItem;
-  active: boolean;
-  onOpenDetails: () => void;
-  onAutoPlayNext: () => void;
+  item: ReelItem
+  active: boolean
+  onOpenDetails: () => void
+  onAutoPlayNext: () => void
 }) => {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [videoKey, setVideoKey] = useState<string | null>(null);
-  const [muted, setMuted] = useState(true);
-  const [playing, setPlaying] = useState(false);
+  const router = useRouter()
+  const playerRef = useRef<any>(null)
 
-  const playerRef = useRef<any>(null);
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [videoKey, setVideoKey] = useState<string | null>(null)
+
+  const [muted, setMuted] = useState(true)
+  const [playing, setPlaying] = useState(false)
+
+  // ✅ Double tap like
+  const [liked, setLiked] = useState(false)
+  const [likesCount, setLikesCount] = useState<number>(item.likes ?? 0)
 
   useEffect(() => {
-    let mounted = true;
+    setLikesCount(item.likes ?? 0)
+  }, [item.likes])
+
+  // ✅ heart burst animation
+  const heartAnim = useRef(new Animated.Value(0)).current
+  const [heartPos, setHeartPos] = useState({ x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 })
+
+  const heartScale = heartAnim.interpolate({
+    inputRange: [0, 0.35, 1],
+    outputRange: [0.2, 1.2, 1],
+  })
+  const heartOpacity = heartAnim.interpolate({
+    inputRange: [0, 0.15, 0.85, 1],
+    outputRange: [0, 1, 1, 0],
+  })
+
+  const playHeart = () => {
+    heartAnim.stopAnimation()
+    heartAnim.setValue(0)
+    Animated.timing(heartAnim, {
+      toValue: 1,
+      duration: 650,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start()
+  }
+
+  const lastTapRef = useRef(0)
+  const tapTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleTap = (e: any) => {
+    const now = Date.now()
+
+    if (now - lastTapRef.current < 280) {
+      if (tapTimeout.current) clearTimeout(tapTimeout.current)
+      tapTimeout.current = null
+      lastTapRef.current = 0
+
+      const { locationX, locationY } = e.nativeEvent
+      setHeartPos({ x: locationX, y: locationY })
+
+      if (!liked) {
+        setLiked(true)
+        setLikesCount((c) => c + 1)
+      }
+      playHeart()
+      return
+    }
+
+    lastTapRef.current = now
+    tapTimeout.current = setTimeout(() => {
+      setMuted((m) => !m)
+      tapTimeout.current = null
+    }, 280)
+  }
+
+  // ✅ Avatar resolution like profile screen for own items
+  const { user } = useUser()
+  const activeProfilePhoto = useActiveProfilePhoto()
+  const isOwnPoster = !!user?.uid && !!item.posterUserId && user.uid === item.posterUserId
+
+  const avatarUri = (isOwnPoster ? activeProfilePhoto : null) || item.posterAvatar || FALLBACK_AVATAR
+
+  const goToPosterProfile = () => {
+    if (!item.posterUserId) return
+    router.push(`/profile?from=social-feed&userId=${encodeURIComponent(String(item.posterUserId))}`)
+  }
+
+  useEffect(() => {
+    let mounted = true
 
     const fetchVideos = async () => {
-      setLoading(true);
-      setError(null);
-      setVideoKey(null);
-      setPlaying(false);
+      setLoading(true)
+      setError(null)
+      setVideoKey(null)
+      setPlaying(false)
 
       try {
-        const res = await fetch(
-          `${API_BASE_URL}/${item.mediaType}/${item.id}/videos?api_key=${API_KEY}`
-        );
-        const json = await res.json();
-        const results: VideoResult[] = json?.results || [];
+        const res = await fetch(`${API_BASE_URL}/${item.mediaType}/${item.id}/videos?api_key=${API_KEY}`)
+        const json = await res.json()
+        const results: VideoResult[] = json?.results || []
 
         const trailer =
           results.find((v) => v.site === 'YouTube' && v.type === 'Trailer') ||
           results.find((v) => v.site === 'YouTube' && v.type === 'Teaser') ||
-          results.find((v) => v.site === 'YouTube');
+          results.find((v) => v.site === 'YouTube')
 
-        if (!mounted) return;
+        if (!mounted) return
 
         if (!trailer?.key) {
-          setError('No trailer available for this title.');
-          setVideoKey(null);
+          setError('No trailer available for this title.')
+          setVideoKey(null)
         } else {
-          setVideoKey(trailer.key);
+          setVideoKey(trailer.key)
         }
       } catch (e) {
-        console.error('Failed to load reel video', e);
-        if (mounted) setError('Unable to load trailer. Try again later.');
+        console.error('Failed to load reel video', e)
+        if (mounted) setError('Unable to load trailer. Try again later.')
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) setLoading(false)
       }
-    };
+    }
 
-    fetchVideos();
+    fetchVideos()
     return () => {
-      mounted = false;
-    };
-  }, [item.id, item.mediaType]);
+      mounted = false
+    }
+  }, [item.id, item.mediaType])
 
   useEffect(() => {
     if (active && videoKey && !loading && !error) {
-      setMuted(true);
-      setPlaying(true);
+      setMuted(true)
+      setPlaying(true)
     } else {
-      setPlaying(false);
+      setPlaying(false)
     }
-  }, [active, videoKey, loading, error]);
+  }, [active, videoKey, loading, error])
 
   const onError = () => {
     Alert.alert('Playback issue', 'Trouble loading the trailer. Redirecting to details.', [
       { text: 'Go to details', onPress: onOpenDetails },
       { text: 'Close', style: 'cancel' },
-    ]);
-  };
+    ])
+  }
 
   return (
     <View style={styles.slide}>
@@ -263,14 +374,9 @@ const ReelSlide = ({
 
       {!loading && videoKey && (
         <View style={styles.playerFrame}>
-          {/* Tap anywhere to mute / unmute */}
-          <TouchableOpacity
-            activeOpacity={1}
-            style={StyleSheet.absoluteFill}
-            onPress={() => setMuted((m) => !m)}
-          />
+          {/* ✅ Single tap = mute/unmute, Double tap = like */}
+          <Pressable style={StyleSheet.absoluteFill} onPress={handleTap} />
 
-          {/* Bigger than the screen horizontally; cropped by playerFrame */}
           <View style={styles.portraitVideoWrap}>
             <YoutubePlayer
               ref={playerRef}
@@ -281,18 +387,13 @@ const ReelSlide = ({
               videoId={videoKey}
               forceAndroidAutoplay
               onReady={() => {
-                // extra nudge to ensure autoplay & hide poster
                 try {
-                  playerRef.current?.playVideo();
-                } catch (e) {
-                  // ignore
-                }
+                  playerRef.current?.playVideo?.()
+                } catch {}
               }}
               onError={onError}
               onChangeState={(state: string) => {
-                if (state === 'ended') {
-                  onAutoPlayNext();
-                }
+                if (state === 'ended') onAutoPlayNext()
               }}
               initialPlayerParams={{
                 controls: 0,
@@ -302,7 +403,7 @@ const ReelSlide = ({
                 playsinline: true,
                 loop: true,
                 playlist: videoKey || undefined,
-                // @ts-ignore – library accepts number/bool
+                // @ts-ignore
                 autoplay: 1,
               }}
               webViewStyle={styles.portraitWebview}
@@ -329,6 +430,20 @@ const ReelSlide = ({
             />
           </View>
 
+          {/* ✅ Heart burst */}
+          <Animated.View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: heartPos.x - 48,
+              top: heartPos.y - 48,
+              opacity: heartOpacity,
+              transform: [{ scale: heartScale }],
+            }}
+          >
+            <Ionicons name="heart" size={96} color="#ff2d55" />
+          </Animated.View>
+
           <LinearGradient
             colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.45)', 'rgba(5,6,15,0.85)']}
             locations={[0, 0.55, 1]}
@@ -336,7 +451,46 @@ const ReelSlide = ({
             pointerEvents="none"
           />
 
-          <View style={styles.metaOverlay}>
+          {/* ✅ Right-side actions (avatar + plus + like count) */}
+          <View style={styles.rightColumn} pointerEvents="box-none">
+            <TouchableOpacity style={styles.avatarAction} onPress={goToPosterProfile} activeOpacity={0.85}>
+              <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
+              <TouchableOpacity
+                style={styles.followPlus}
+                onPress={goToPosterProfile}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="add" size={16} color="#fff" />
+              </TouchableOpacity>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={() => {
+                // single-tap heart button also likes
+                if (!liked) {
+                  setLiked(true)
+                  setLikesCount((c) => c + 1)
+                } else {
+                  // optional: allow unlike
+                  setLiked(false)
+                  setLikesCount((c) => Math.max(0, c - 1))
+                }
+              }}
+              activeOpacity={0.85}
+            >
+              <Ionicons name={liked ? 'heart' : 'heart-outline'} size={34} color={liked ? '#ff2d55' : '#fff'} />
+              <Text style={styles.actionCount}>{likesCount}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.actionBtn} onPress={onOpenDetails} activeOpacity={0.85}>
+              <Ionicons name="information-circle-outline" size={34} color="#fff" />
+              <Text style={styles.actionCount}>Info</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* ✅ Bottom meta */}
+          <View style={styles.metaOverlay} pointerEvents="none">
             <Text style={styles.metaTitle} numberOfLines={2}>
               {item.title || 'Reel'}
             </Text>
@@ -347,13 +501,24 @@ const ReelSlide = ({
               <View style={[styles.tag, styles.accentTag]}>
                 <Text style={styles.tagText}>Trailer</Text>
               </View>
+              {!muted ? (
+                <View style={[styles.tag, styles.audioTag]}>
+                  <Ionicons name="volume-high" size={14} color="#fff" />
+                  <Text style={[styles.tagText, { marginLeft: 6 }]}>Sound</Text>
+                </View>
+              ) : (
+                <View style={[styles.tag, styles.audioTag]}>
+                  <Ionicons name="volume-mute" size={14} color="#fff" />
+                  <Text style={[styles.tagText, { marginLeft: 6 }]}>Muted</Text>
+                </View>
+              )}
             </View>
           </View>
         </View>
       )}
     </View>
-  );
-};
+  )
+}
 
 const styles = StyleSheet.create({
   wrapper: {
@@ -398,7 +563,6 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH,
     height: SCREEN_HEIGHT,
   },
-  // fullscreen crop container
   playerFrame: {
     width: SCREEN_WIDTH,
     height: SCREEN_HEIGHT,
@@ -407,7 +571,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // wider than the screen horizontally; sides cropped
   portraitVideoWrap: {
     width: VIDEO_WIDTH,
     height: VIDEO_HEIGHT,
@@ -424,13 +587,13 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    height: 220,
+    height: 240,
   },
   metaOverlay: {
     position: 'absolute',
-    bottom: 36,
-    left: 20,
-    right: 20,
+    bottom: Platform.OS === 'ios' ? 40 : 34,
+    left: 18,
+    right: 92,
     gap: 12,
   },
   metaTitle: {
@@ -442,8 +605,11 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     gap: 10,
+    flexWrap: 'wrap',
   },
   tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 12,
@@ -454,6 +620,10 @@ const styles = StyleSheet.create({
   accentTag: {
     backgroundColor: 'rgba(229,9,20,0.25)',
     borderColor: 'rgba(229,9,20,0.45)',
+  },
+  audioTag: {
+    backgroundColor: 'rgba(125,216,255,0.14)',
+    borderColor: 'rgba(125,216,255,0.28)',
   },
   tagText: {
     color: '#fff',
@@ -480,6 +650,39 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
   },
-});
 
-export default ReelPlayerScreen;
+  // ✅ Right column actions
+  rightColumn: {
+    position: 'absolute',
+    right: 10,
+    bottom: Platform.OS === 'ios' ? 92 : 80,
+    width: 70,
+    alignItems: 'center',
+    gap: 20,
+  },
+  avatarAction: { alignItems: 'center', position: 'relative' },
+  avatarImage: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    borderWidth: 2,
+    borderColor: '#fff',
+    backgroundColor: '#222',
+  },
+  followPlus: {
+    position: 'absolute',
+    bottom: -8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ff2d55',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  actionBtn: { alignItems: 'center' },
+  actionCount: { color: '#fff', marginTop: 6, fontSize: 12, fontWeight: '700' },
+})
+
+export default ReelPlayerScreen

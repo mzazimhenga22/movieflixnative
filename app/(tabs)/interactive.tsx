@@ -147,12 +147,14 @@ const ACCENT = '#e50914';
                   title="Watch Party"
                   description="Host live watch parties with synchronized playback and in-app chat."
                   onPress={() => router.push('/watchparty')}
+                  iconColor={ACCENT}
                 />
                 <FeatureCard
                   iconName="comment-question"
                   title="In-Playback Trivia"
                   description="Engage with trivia and challenges during key moments."
                   onPress={() => console.log('In-Playback Trivia')}
+                  iconColor={ACCENT}
                 />
               </View>
 
@@ -162,12 +164,14 @@ const ACCENT = '#e50914';
                   title="Augmented Reality Mode"
                   description="Experience AR with movie posters and interactive objects."
                   onPress={() => console.log('Augmented Reality Mode')}
+                  iconColor={ACCENT}
                 />
                 <FeatureCard
                   iconName="format-list-checks"
                   title="Personalized Watchlists"
                   description="Get personalized movie journeys based on your viewing history."
                   onPress={() => console.log('Personalized Watchlists')}
+                  iconColor={ACCENT}
                 />
               </View>
 
@@ -177,12 +181,14 @@ const ACCENT = '#e50914';
                   title="Behind-the-Scenes"
                   description="Discover exclusive content and interactive Easter egg hunts."
                   onPress={() => console.log('Behind-the-Scenes')}
+                  iconColor={ACCENT}
                 />
                 <FeatureCard
                   iconName="palette"
                   title="Customizable UI Themes"
                   description="Switch between dark mode, cinema mode, and more."
                   onPress={() => console.log('Customizable UI Themes')}
+                  iconColor={ACCENT}
                 />
               </View>
 
@@ -192,12 +198,14 @@ const ACCENT = '#e50914';
                   title="Voice Command"
                   description="Control the app hands-free with your voice."
                   onPress={() => console.log('Voice Command')}
+                  iconColor={ACCENT}
                 />
                 <FeatureCard
                   iconName="heart-multiple-outline"
                   title="Mood Mixer"
                   description="Blend genres and moods to discover surprising new picks."
                   onPress={() => console.log('Mood Mixer')}
+                  iconColor={ACCENT}
                 />
               </View>
 
@@ -208,6 +216,7 @@ const ACCENT = '#e50914';
                   description="Share live reactions during movies with friends and other viewers."
                   isLarge={true}
                   onPress={() => router.push('/social-feed')}
+                  iconColor={ACCENT}
                 />
                 <View style={styles.row}>
                   <FeatureCard
@@ -215,12 +224,14 @@ const ACCENT = '#e50914';
                     title="Live Subtitles Lab"
                     description="Test experimental subtitle styles, fonts, and live translations."
                     onPress={() => console.log('Live Subtitles Lab')}
+                    iconColor={ACCENT}
                   />
                   <FeatureCard
                     iconName="timeline-text"
                     title="Scene Timeline"
                     description="Jump to key scenes, trailers, and behind-the-scenes moments."
                     onPress={() => console.log('Scene Timeline')}
+                    iconColor={ACCENT}
                   />
                 </View>
                 <View style={styles.row}>
@@ -229,12 +240,14 @@ const ACCENT = '#e50914';
                     title="Interactive Stories"
                     description="Prototype choose‑your‑path narratives and alternate endings."
                     onPress={() => console.log('Interactive Stories')}
+                    iconColor={ACCENT}
                   />
                   <FeatureCard
                     iconName="robot-excited"
                     title="AI Story Coach"
                     description="Get AI‑powered tips on what to watch next and why."
                     onPress={() => console.log('AI Story Coach')}
+                    iconColor={ACCENT}
                   />
                 </View>
               </View>

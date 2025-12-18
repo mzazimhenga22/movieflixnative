@@ -1,33 +1,32 @@
 import {
   ClientRoleType,
   ChannelProfileType,
-  RtcEngine,
-  RtcEngineContext,
 } from 'react-native-agora';
+import RtcEngine from 'react-native-agora';
+import type { IRtcEngine } from 'react-native-agora';
 import { AGORA_APP_ID, assertAgoraConfigured } from '@/constants/agora';
 import type { CallType } from './types';
 
-let enginePromise: Promise<RtcEngine> | null = null;
+let enginePromise: Promise<IRtcEngine> | null = null;
 
-const ensureEngineInstance = async (): Promise<RtcEngine> => {
+const ensureEngineInstance = async (): Promise<IRtcEngine> => {
   if (enginePromise) {
     return enginePromise;
   }
 
   assertAgoraConfigured();
-  enginePromise = RtcEngine.createWithContext(
-    new RtcEngineContext(AGORA_APP_ID, {
-      channelProfile: ChannelProfileType.ChannelProfileCommunication,
-    }),
-  );
-  const engine = await enginePromise;
+  const engine = RtcEngine();
+  await engine.initialize({
+    appId: AGORA_APP_ID,
+    channelProfile: ChannelProfileType.ChannelProfileCommunication,
+  });
   await engine.enableAudio();
-  await engine.setChannelProfile(ChannelProfileType.ChannelProfileCommunication);
   await engine.setClientRole(ClientRoleType.ClientRoleBroadcaster);
+  enginePromise = Promise.resolve(engine);
   return engine;
 };
 
-export const getAgoraEngine = async (mode: CallType): Promise<RtcEngine> => {
+export const getAgoraEngine = async (mode: CallType): Promise<IRtcEngine> => {
   const engine = await ensureEngineInstance();
   if (mode === 'video') {
     await engine.enableVideo();
@@ -42,11 +41,8 @@ export const destroyAgoraEngine = async (): Promise<void> => {
   try {
     const engine = await enginePromise;
     await engine.leaveChannel();
-    // @ts-expect-error release is not typed in older versions
-    if (typeof (engine as any).release === 'function') {
-      await (engine as any).release();
-    } else if (typeof RtcEngine.destroy === 'function') {
-      await RtcEngine.destroy();
+    if (typeof engine.release === 'function') {
+      await engine.release();
     }
   } catch (err) {
     console.warn('Failed to release Agora engine', err);

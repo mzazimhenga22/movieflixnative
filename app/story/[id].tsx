@@ -1,23 +1,23 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  View,
-  Image,
-  StyleSheet,
-  TouchableOpacity,
-  SafeAreaView,
-  Text,
-  Dimensions,
-  Pressable,
-  Animated,
-  TextInput,
-} from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+    Animated,
+    Dimensions,
+    Image,
+    Pressable,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { firestore } from '../../constants/firebase';
-import { findOrCreateConversation, sendMessage, type Profile } from '../messaging/controller';
 import { useUser } from '../../hooks/use-user';
+import { findOrCreateConversation, sendMessage, type Profile } from '../messaging/controller';
 
 interface StoryDoc {
   photoURL: string;
@@ -218,8 +218,31 @@ const StoryScreen = () => {
 
   return (
     <View style={styles.container}>
-      <SafeAreaView style={styles.header}>
-        <View style={styles.headerRow}>
+      <SafeAreaView style={styles.header} />
+
+      {/* Progress bars */}
+      <View style={styles.progressRow}>
+        {stories.map((s, index) => {
+          const barWidth =
+            index < currentIndex
+              ? '100%'
+              : index === currentIndex
+              ? progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '100%'],
+                })
+              : '0%';
+          return (
+            <View key={s.id} style={styles.progressTrack}>
+              <Animated.View style={[styles.progressFill, { width: barWidth }]} />
+            </View>
+          );
+        })}
+      </View>
+
+      {/* Header block below progress bar: avatar, back button and actions */}
+      <SafeAreaView style={styles.headerBelow}>
+        <View style={styles.headerRowBelow}>
           <View style={styles.headerUserBlock}>
             <TouchableOpacity onPress={() => router.back()} style={styles.closeButton}>
               <Ionicons name="chevron-back" size={26} color="white" />
@@ -250,26 +273,6 @@ const StoryScreen = () => {
           </View>
         </View>
       </SafeAreaView>
-
-      {/* Progress bars */}
-      <View style={styles.progressRow}>
-        {stories.map((s, index) => {
-          const barWidth =
-            index < currentIndex
-              ? '100%'
-              : index === currentIndex
-              ? progress.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ['0%', '100%'],
-                })
-              : '0%';
-          return (
-            <View key={s.id} style={styles.progressTrack}>
-              <Animated.View style={[styles.progressFill, { width: barWidth }]} />
-            </View>
-          );
-        })}
-      </View>
 
       <Pressable
         style={styles.tapLayer}
@@ -345,6 +348,18 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 3,
+  },
+  headerBelow: {
+    position: 'absolute',
+    top: 68,
+    left: 12,
+    right: 12,
+    zIndex: 4,
+  },
+  headerRowBelow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   storyImage: {
     width: '100%',
@@ -499,6 +514,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 16,
     paddingVertical: 8,
+    zIndex: 8,
   },
   replyInput: {
     flex: 1,

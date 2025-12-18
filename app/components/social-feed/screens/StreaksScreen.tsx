@@ -1,18 +1,18 @@
+import { getAllStreaks, updateStreakForContext } from '@/lib/streaks/streakManager';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  FlatList,
-  StyleSheet,
-  Text,
-  View,
-  TouchableOpacity,
-  Modal,
-  SafeAreaView,
+    FlatList,
+    Modal,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import ScreenWrapper from '../../../../components/ScreenWrapper';
-import { useRouter } from 'expo-router';
-import { getAllStreaks, updateStreakForContext } from '@/lib/streaks/streakManager';
-import { getFollowing, Profile, findOrCreateConversation } from '../../../messaging/controller';
+import { findOrCreateConversation, getFollowing, Profile } from '../../../messaging/controller';
 
 interface Streak {
   id: string;
@@ -103,13 +103,23 @@ export default function StreaksScreen() {
               type?: string;
             };
             const id = key;
+            const sourceType = data.type ?? 'chat';
+            let activityLabel = '';
+            if (sourceType === 'chat') {
+              activityLabel = data.partnerName ? `Chat with ${data.partnerName}` : 'Chat streak';
+            } else if (sourceType === 'story') {
+              activityLabel = data.partnerName ? `Stories by ${data.partnerName}` : 'Posted stories';
+            } else {
+              activityLabel = 'Feed activity';
+            }
+
             return {
               id,
               days: data.count ?? 0,
-              activity: data.partnerName || 'Chat streak',
+              activity: activityLabel,
               lastUpdate: data.lastDate || 'Unknown',
               partnerId: data.partnerId ?? null,
-              sourceType: data.type ?? 'chat',
+              sourceType,
             } as Streak;
           } catch {
             return null;

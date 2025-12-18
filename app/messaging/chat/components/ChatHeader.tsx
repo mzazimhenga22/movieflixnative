@@ -10,9 +10,11 @@ interface ChatHeaderProps {
   conversation?: Conversation | null;
   isTyping?: boolean;
   streakCount?: number;
+  lastSeen?: Date | null;
   onEditGroup?: () => void;
   onStartVoiceCall?: () => void;
   onStartVideoCall?: () => void;
+  onSearch?: () => void;
   callDisabled?: boolean;
 }
 
@@ -21,20 +23,39 @@ const ChatHeader = ({
   conversation,
   isTyping,
   streakCount,
+  lastSeen,
   onEditGroup,
   onStartVoiceCall,
   onStartVideoCall,
+  onSearch,
   callDisabled,
 }: ChatHeaderProps) => {
   const router = useRouter();
 
+  const formatLastSeen = (date: Date) => {
+    const now = new Date();
+    const diff = now.getTime() - date.getTime();
+    const minutes = Math.floor(diff / (1000 * 60));
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return date.toLocaleDateString();
+  };
+
   const handleProfilePress = () => {
-    if (!recipient) return;
     if (conversation?.isGroup) {
-      onEditGroup?.();
+      if (conversation.id) {
+        router.push(`/messaging/group-details?conversationId=${conversation.id}`);
+      }
       return;
     }
-    router.push(`/story/${recipient.id}?photoURL=${recipient.photoURL}`);
+    if (recipient?.id) {
+      router.push(`/profile?userId=${recipient.id}&from=social-feed`);
+    }
   };
 
   return (
@@ -80,11 +101,24 @@ const ChatHeader = ({
                   ? 'Typing…'
                   : typeof streakCount === 'number' && streakCount > 0
                     ? `🔥 ${streakCount} day streak`
-                    : recipient?.status ?? 'Online'}
+                    : recipient?.status === 'online'
+                      ? 'Online'
+                      : lastSeen
+                        ? `Last seen ${formatLastSeen(lastSeen)}`
+                        : 'Offline'}
             </Text>
           </View>
 
           <View style={styles.headerActions}>
+            {onSearch && (
+              <TouchableOpacity
+                style={styles.actionButton}
+                accessibilityLabel="Search messages"
+                onPress={onSearch}
+              >
+                <Ionicons name="search" size={18} color="white" />
+              </TouchableOpacity>
+            )}
             {conversation?.isGroup && (
               <TouchableOpacity
                 style={styles.actionButton}

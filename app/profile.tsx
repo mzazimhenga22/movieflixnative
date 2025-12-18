@@ -1,24 +1,47 @@
-// app/profile.tsx (or wherever your ProfileScreen file lives)
+// app/profile.tsx
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  Alert,
-} from 'react-native';
-import { StatusBar } from 'expo-status-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+    Alert,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+
 import ScreenWrapper from '../components/ScreenWrapper';
 import { authPromise, firestore } from '../constants/firebase';
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, collection, getDocs, where } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
 import { getAccentFromPosterPath } from '../constants/theme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { onAuthStateChanged } from 'firebase/auth';
+import {
+    addDoc,
+    arrayRemove,
+    arrayUnion,
+    collection,
+    doc,
+    getDoc,
+    getDocs,
+    query,
+    serverTimestamp,
+    updateDoc,
+    where,
+} from 'firebase/firestore';
+
+type UserDoc = {
+  displayName?: string;
+  photoURL?: string | null;
+  favoriteGenres?: string[];
+  favoriteColor?: string;
+  followers?: string[];
+  following?: string[];
+};
 
 const ProfileScreen: React.FC = () => {
   const router = useRouter();
@@ -28,7 +51,8 @@ const ProfileScreen: React.FC = () => {
 
   const [authReady, setAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<any | null>(null);
-  const [userProfile, setUserProfile] = useState<any | null>(null);
+
+  const [userProfile, setUserProfile] = useState<UserDoc | null>(null);
   const [isFollowing, setIsFollowing] = useState(false);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
@@ -41,23 +65,22 @@ const ProfileScreen: React.FC = () => {
   const userIdToDisplay = profileUserId || currentUser?.uid;
   const isOwnProfile = !profileUserId || profileUserId === currentUser?.uid;
 
+  // Auth bootstrap
   useEffect(() => {
     let unsub: (() => void) | null = null;
 
-    // wait for firebase auth to initialize, then attach listener
     authPromise
       .then((auth) => {
         setAuthReady(true);
         setCurrentUser(auth.currentUser ?? null);
 
-        // subscribe to auth state changes
         unsub = onAuthStateChanged(auth, (u) => {
           setCurrentUser(u ?? null);
         });
       })
       .catch((err) => {
         console.warn('Auth initialization failed in ProfileScreen:', err);
-        setAuthReady(true); // still allow UI, but no auth
+        setAuthReady(true);
       });
 
     return () => {
@@ -65,14 +88,15 @@ const ProfileScreen: React.FC = () => {
     };
   }, []);
 
+  // ✅ Focus-safe async (no returning a Promise)
   useFocusEffect(
     useCallback(() => {
-      let isMounted = true;
+      let mounted = true;
 
-      const syncActiveProfile = async () => {
+      (async () => {
         try {
           const stored = await AsyncStorage.getItem('activeProfile');
-          if (!isMounted) return;
+          if (!mounted) return;
 
           if (stored) {
             const parsed = JSON.parse(stored);
@@ -86,53 +110,55 @@ const ProfileScreen: React.FC = () => {
           }
         } catch (err) {
           console.error('[profile] failed to load active profile avatar', err);
-          if (isMounted) {
-            setActiveProfilePhoto(null);
-          }
+          if (mounted) setActiveProfilePhoto(null);
         }
-      };
-
-      syncActiveProfile();
+      })();
 
       return () => {
-        isMounted = false;
+        mounted = false;
       };
     }, [])
   );
 
+  // Fetch profile + stats when user changes
   useEffect(() => {
-    // Fetch profile whenever the displayed user id changes
     if (!userIdToDisplay) {
       setUserProfile(null);
       setFollowersCount(0);
       setFollowingCount(0);
       setIsFollowing(false);
+      setReviewsCount(0);
       return;
     }
 
     let mounted = true;
-    const fetchUserProfile = async () => {
+
+    const run = async () => {
       setLoadingProfile(true);
       try {
+        // user doc
         const userDocRef = doc(firestore, 'users', userIdToDisplay as string);
         const userDocSnap = await getDoc(userDocRef);
 
         if (!mounted) return;
 
         if (userDocSnap.exists()) {
-          const userData = userDocSnap.data() as any;
+          const userData = userDocSnap.data() as UserDoc;
           setUserProfile(userData);
-          setFollowersCount(userData.followers?.length || 0);
-          setFollowingCount(userData.following?.length || 0);
 
-          // If viewing another user's profile, check whether current user follows them
+          const followersArr = Array.isArray(userData.followers) ? userData.followers : [];
+          const followingArr = Array.isArray(userData.following) ? userData.following : [];
+          setFollowersCount(followersArr.length);
+          setFollowingCount(followingArr.length);
+
+          // following state when viewing another profile
           if (!isOwnProfile && currentUser) {
             try {
               const currentUserDocRef = doc(firestore, 'users', currentUser.uid);
               const currentUserDocSnap = await getDoc(currentUserDocRef);
               if (currentUserDocSnap.exists()) {
-                const followingArr = currentUserDocSnap.data()?.following || [];
-                setIsFollowing(followingArr.includes(userIdToDisplay));
+                const curFollowing = currentUserDocSnap.data()?.following ?? [];
+                setIsFollowing(Array.isArray(curFollowing) && curFollowing.includes(userIdToDisplay));
               } else {
                 setIsFollowing(false);
               }
@@ -141,7 +167,6 @@ const ProfileScreen: React.FC = () => {
               setIsFollowing(false);
             }
           } else {
-            // if own profile, reset follow state
             setIsFollowing(false);
           }
         } else {
@@ -151,31 +176,31 @@ const ProfileScreen: React.FC = () => {
           setIsFollowing(false);
         }
 
-        // Fetch simple review stats
+        // ✅ reviews count (Firestore v9 query())
         try {
           const reviewsRef = collection(firestore, 'reviews');
-          const q = where('userId', '==', userIdToDisplay as string);
-          const snapshot = await getDocs(reviewsRef.withConverter<any>({
-            toFirestore: (data) => data,
-            fromFirestore: (snap) => snap.data(),
-          }).where('userId', '==', userIdToDisplay as string));
-          setReviewsCount(snapshot.size);
+          const q = query(reviewsRef, where('userId', '==', userIdToDisplay as string));
+          const snapshot = await getDocs(q);
+          if (mounted) setReviewsCount(snapshot.size);
         } catch (err) {
           console.warn('Failed to fetch review stats for profile', err);
-          setReviewsCount(0);
+          if (mounted) setReviewsCount(0);
         }
       } catch (err) {
         console.error('Failed to fetch user profile:', err);
-        setUserProfile(null);
-        setFollowersCount(0);
-        setFollowingCount(0);
-        setIsFollowing(false);
+        if (mounted) {
+          setUserProfile(null);
+          setFollowersCount(0);
+          setFollowingCount(0);
+          setIsFollowing(false);
+          setReviewsCount(0);
+        }
       } finally {
         if (mounted) setLoadingProfile(false);
       }
     };
 
-    fetchUserProfile();
+    void run();
 
     return () => {
       mounted = false;
@@ -191,7 +216,6 @@ const ProfileScreen: React.FC = () => {
     if (!userIdToDisplay || isOwnProfile) return;
 
     setFollowBusy(true);
-    // optimistic update
     setIsFollowing(true);
     setFollowersCount((c) => c + 1);
 
@@ -199,16 +223,23 @@ const ProfileScreen: React.FC = () => {
       const currentUserDocRef = doc(firestore, 'users', currentUser.uid);
       const targetUserDocRef = doc(firestore, 'users', userIdToDisplay as string);
 
-      await updateDoc(currentUserDocRef, {
-        following: arrayUnion(userIdToDisplay),
-      });
+      await updateDoc(currentUserDocRef, { following: arrayUnion(userIdToDisplay) });
+      await updateDoc(targetUserDocRef, { followers: arrayUnion(currentUser.uid) });
 
-      await updateDoc(targetUserDocRef, {
-        followers: arrayUnion(currentUser.uid),
+      await addDoc(collection(firestore, 'notifications'), {
+        type: 'follow',
+        scope: 'social',
+        channel: 'community',
+        actorId: currentUser.uid,
+        actorName: currentUser.displayName || 'A new user',
+        actorAvatar: currentUser.photoURL || null,
+        targetUid: userIdToDisplay,
+        message: `${currentUser.displayName || 'A new user'} started following you.`,
+        read: false,
+        createdAt: serverTimestamp(),
       });
     } catch (err) {
       console.error('Follow failed:', err);
-      // rollback optimistic update
       setIsFollowing(false);
       setFollowersCount((c) => Math.max(0, c - 1));
       Alert.alert('Error', 'Unable to follow user. Please try again.');
@@ -226,7 +257,6 @@ const ProfileScreen: React.FC = () => {
     if (!userIdToDisplay || isOwnProfile) return;
 
     setFollowBusy(true);
-    // optimistic update
     setIsFollowing(false);
     setFollowersCount((c) => Math.max(0, c - 1));
 
@@ -234,16 +264,10 @@ const ProfileScreen: React.FC = () => {
       const currentUserDocRef = doc(firestore, 'users', currentUser.uid);
       const targetUserDocRef = doc(firestore, 'users', userIdToDisplay as string);
 
-      await updateDoc(currentUserDocRef, {
-        following: arrayRemove(userIdToDisplay),
-      });
-
-      await updateDoc(targetUserDocRef, {
-        followers: arrayRemove(currentUser.uid),
-      });
+      await updateDoc(currentUserDocRef, { following: arrayRemove(userIdToDisplay) });
+      await updateDoc(targetUserDocRef, { followers: arrayRemove(currentUser.uid) });
     } catch (err) {
       console.error('Unfollow failed:', err);
-      // rollback optimistic update
       setIsFollowing(true);
       setFollowersCount((c) => c + 1);
       Alert.alert('Error', 'Unable to unfollow user. Please try again.');
@@ -253,51 +277,37 @@ const ProfileScreen: React.FC = () => {
   };
 
   const handleBack = () => {
-    if (cameFromSocial) {
-      router.replace('/social-feed');
-    } else {
-      router.replace('/movies');
-    }
+    if (cameFromSocial) router.replace('/social-feed');
+    else router.replace('/movies');
   };
 
-  const handleSearch = () => {
-    router.push('/profile-search');
-  };
+  const handleSearch = () => router.push('/profile-search');
 
   const handleLogout = async () => {
     try {
       const auth = await authPromise;
       await auth.signOut();
       await AsyncStorage.removeItem('activeProfile');
-      router.replace('/(auth)/login'); // redirect to login or root
+      router.replace('/(auth)/login');
     } catch (err) {
       console.error('Sign out failed:', err);
       Alert.alert('Error', 'Failed to sign out. Please try again.');
     }
   };
 
-  const handleEditProfile = () => {
-    console.log('Edit profile pressed');
-    // navigate to edit screen if implemented
-    router.push('/edit-profile');
-  };
+  const handleEditProfile = () => router.push('/edit-profile');
+  const handleSwitchProfile = () => router.push('/select-profile');
+  const handleSettings = () => router.push('/settings');
 
-  const handleSwitchProfile = () => {
-    router.push('/select-profile');
-  };
-
-  const handleSettings = () => {
-    router.push('/settings');
-  };
-
-  const favoriteGenres = userProfile?.favoriteGenres || [];
+  const favoriteGenres = userProfile?.favoriteGenres ?? [];
   const accentColor = getAccentFromPosterPath(
     userProfile?.favoriteColor || (favoriteGenres[0] as string | undefined)
   );
+
   const fallbackAvatar =
     'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&q=80&w=1780&ixlib=rb-4.0.3';
-  const avatarUri =
-    (isOwnProfile ? activeProfilePhoto : null) || userProfile?.photoURL || fallbackAvatar;
+
+  const avatarUri = (isOwnProfile ? activeProfilePhoto : null) || userProfile?.photoURL || fallbackAvatar;
 
   return (
     <View style={[styles.rootContainer, cameFromSocial && { backgroundColor: '#05060f' }]}>
@@ -309,9 +319,11 @@ const ProfileScreen: React.FC = () => {
           end={[1, 1]}
           style={StyleSheet.absoluteFillObject}
         />
+
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color="white" />
         </TouchableOpacity>
+
         {isOwnProfile && (
           <TouchableOpacity style={styles.searchButton} onPress={handleSearch}>
             <Ionicons name="search" size={24} color="white" />
@@ -327,6 +339,7 @@ const ProfileScreen: React.FC = () => {
                 end={{ x: 1, y: 1 }}
                 style={styles.headerSheen}
               />
+
               <Image source={{ uri: avatarUri }} style={styles.avatar} />
               <Text style={styles.name}>{userProfile?.displayName || 'No-Name'}</Text>
               <Text style={styles.memberSince}>Member since 2023</Text>
@@ -372,7 +385,7 @@ const ProfileScreen: React.FC = () => {
             <View style={styles.glassCard}>
               <Text style={styles.sectionTitle}>Favorite Genres</Text>
               <View style={styles.genresList}>
-                {favoriteGenres.map((genre: string) => (
+                {favoriteGenres.map((genre) => (
                   <View key={genre} style={styles.genreTag}>
                     <Text style={styles.genreText}>{genre}</Text>
                   </View>
@@ -382,6 +395,7 @@ const ProfileScreen: React.FC = () => {
 
             <View style={[styles.glassCard, { paddingVertical: 12 }]}>
               <Text style={styles.sectionTitle}>Actions</Text>
+
               <TouchableOpacity style={styles.actionItem} onPress={handleSettings}>
                 <Ionicons name="settings-outline" size={24} color="white" />
                 <Text style={styles.actionText}>Settings</Text>
@@ -406,16 +420,15 @@ const ProfileScreen: React.FC = () => {
   );
 };
 
+export const options = { headerShown: false };
+
 const styles = StyleSheet.create({
-  rootContainer: {
-    flex: 1,
-    backgroundColor: '#05060f',
-  },
+  rootContainer: { flex: 1, backgroundColor: '#05060f' },
   container: {
     flexGrow: 1,
     paddingHorizontal: 20,
     paddingTop: 30,
-    paddingBottom: 80, // Add padding to avoid overlap with bottom nav
+    paddingBottom: 80,
   },
   backButton: {
     position: 'absolute',
@@ -435,9 +448,8 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 8,
   },
-  inner: {
-    flex: 1,
-  },
+  inner: { flex: 1 },
+
   profileHeader: {
     alignItems: 'center',
     marginBottom: 24,
@@ -448,10 +460,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.06)',
     overflow: 'hidden',
   },
-  headerSheen: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.6,
-  },
+  headerSheen: { ...StyleSheet.absoluteFillObject, opacity: 0.6 },
+
   avatar: {
     width: 120,
     height: 120,
@@ -460,17 +470,11 @@ const styles = StyleSheet.create({
     borderColor: '#e50914',
     marginBottom: 15,
   },
-  name: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 5,
-  },
-  memberSince: {
-    fontSize: 14,
-    color: '#BBBBBB',
-    marginBottom: 15,
-  },
+  name: { fontSize: 28, fontWeight: 'bold', color: 'white', marginBottom: 5 },
+  memberSince: { fontSize: 14, color: '#BBBBBB', marginBottom: 15 },
+
+  selfActionRow: { flexDirection: 'row', gap: 12 },
+
   editProfileButton: {
     backgroundColor: '#e50914',
     paddingVertical: 10,
@@ -479,14 +483,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
   },
-  editProfileButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  selfActionRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
+  editProfileButtonText: { color: 'white', fontWeight: 'bold' },
+
   switchProfileButton: {
     paddingVertical: 10,
     paddingHorizontal: 22,
@@ -495,10 +493,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.14)',
     backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  switchProfileButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
+  switchProfileButtonText: { color: 'white', fontWeight: 'bold' },
+
   followButton: {
     backgroundColor: '#e50914',
     paddingVertical: 10,
@@ -515,10 +511,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
   },
-  followButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
+  followButtonText: { color: 'white', fontWeight: 'bold' },
+
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -529,22 +523,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
-  statBox: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#BBBBBB',
-    marginTop: 5,
-  },
-  favoriteGenresContainer: {
-    marginBottom: 30,
-  },
+  statBox: { alignItems: 'center' },
+  statValue: { fontSize: 22, fontWeight: 'bold', color: 'white' },
+  statLabel: { fontSize: 12, color: '#BBBBBB', marginTop: 5 },
+
   glassCard: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 16,
@@ -557,16 +539,10 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
   },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 15,
-  },
-  genresList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
+
+  sectionTitle: { fontSize: 20, fontWeight: 'bold', color: 'white', marginBottom: 15 },
+
+  genresList: { flexDirection: 'row', flexWrap: 'wrap' },
   genreTag: {
     backgroundColor: 'rgba(255,255,255,0.06)',
     paddingVertical: 6,
@@ -575,10 +551,8 @@ const styles = StyleSheet.create({
     marginRight: 10,
     marginBottom: 10,
   },
-  genreText: {
-    color: 'white',
-    fontSize: 14,
-  },
+  genreText: { color: 'white', fontSize: 14 },
+
   actionItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -586,11 +560,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.06)',
   },
-  actionText: {
-    color: 'white',
-    fontSize: 18,
-    marginLeft: 15,
-  },
+  actionText: { color: 'white', fontSize: 18, marginLeft: 15 },
 });
 
 export default ProfileScreen;

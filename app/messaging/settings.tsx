@@ -1,19 +1,14 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Switch, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import ScreenWrapper from '../../components/ScreenWrapper';
 import { useRouter } from 'expo-router';
+import React, { useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import ScreenWrapper from '../../components/ScreenWrapper';
+import { useMessagingSettings } from '@/hooks/useMessagingSettings';
 
 const MessagingSettingsScreen: React.FC = () => {
   const router = useRouter();
-
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [showPreviews, setShowPreviews] = useState(true);
-  const [readReceipts, setReadReceipts] = useState(true);
-  const [typingIndicators, setTypingIndicators] = useState(true);
-  const [mediaAutoDownloadWifi, setMediaAutoDownloadWifi] = useState(true);
-  const [mediaAutoDownloadCellular, setMediaAutoDownloadCellular] = useState(false);
+  const { settings, updateSettings } = useMessagingSettings();
 
   return (
     <ScreenWrapper>
@@ -50,15 +45,15 @@ const MessagingSettingsScreen: React.FC = () => {
             icon="notifications-outline"
             title="Message notifications"
             description="Show alerts for new chats"
-            value={notificationsEnabled}
-            onChange={setNotificationsEnabled}
+            value={settings.notificationsEnabled}
+            onChange={(value) => updateSettings({ notificationsEnabled: value })}
           />
           <SettingRow
             icon="chatbox-ellipses-outline"
             title="Show message preview"
             description="Display a snippet on lock screen"
-            value={showPreviews}
-            onChange={setShowPreviews}
+            value={settings.showPreviews}
+            onChange={(value) => updateSettings({ showPreviews: value })}
           />
         </View>
 
@@ -68,15 +63,15 @@ const MessagingSettingsScreen: React.FC = () => {
             icon="checkmark-done-outline"
             title="Read receipts"
             description="Let others see when you read"
-            value={readReceipts}
-            onChange={setReadReceipts}
+            value={settings.readReceipts}
+            onChange={(value) => updateSettings({ readReceipts: value })}
           />
           <SettingRow
             icon="pulse-outline"
             title="Typing indicators"
             description="Show when you're typing"
-            value={typingIndicators}
-            onChange={setTypingIndicators}
+            value={settings.typingIndicators}
+            onChange={(value) => updateSettings({ typingIndicators: value })}
           />
         </View>
 
@@ -86,15 +81,15 @@ const MessagingSettingsScreen: React.FC = () => {
             icon="wifi-outline"
             title="Auto-download on Wi‑Fi"
             description="Download photos & videos on Wi‑Fi"
-            value={mediaAutoDownloadWifi}
-            onChange={setMediaAutoDownloadWifi}
+            value={settings.mediaAutoDownloadWifi}
+            onChange={(value) => updateSettings({ mediaAutoDownloadWifi: value })}
           />
           <SettingRow
             icon="cellular-outline"
             title="Auto-download on cellular"
             description="Use mobile data for media"
-            value={mediaAutoDownloadCellular}
-            onChange={setMediaAutoDownloadCellular}
+            value={settings.mediaAutoDownloadCellular}
+            onChange={(value) => updateSettings({ mediaAutoDownloadCellular: value })}
           />
         </View>
       </ScrollView>
@@ -223,4 +218,3 @@ const styles = StyleSheet.create({
 });
 
 export default MessagingSettingsScreen;
-

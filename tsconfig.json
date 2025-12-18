@@ -5,7 +5,8 @@
     "strict": true,
     "jsx": "react-native",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      "@p-stream/*": ["./providers-temp/src/*"]
     },
     // Suppress node_modules and package config errors
     "skipLibCheck": true,

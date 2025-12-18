@@ -1,9 +1,12 @@
 import {
   addDoc,
+  arrayUnion,
   collection,
   doc,
   getDoc,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -14,7 +17,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { firestore } from '@/constants/firebase';
-import { requestAgoraToken } from './tokenService';
+
 import type { CallSession, CallStatus, CreateCallOptions } from './types';
 
 const callsCollection = collection(firestore, 'calls');
@@ -23,8 +26,6 @@ const ACTIVE_STATUSES: CallStatus[] = ['initiated', 'ringing', 'active'];
 export type CreateCallResult = {
   callId: string;
   channelName: string;
-  token: string;
-  agoraUid: number;
 };
 
 const normalizeCallSnapshot = (
@@ -33,8 +34,8 @@ const normalizeCallSnapshot = (
   if (!snapshot.exists()) return null;
   const data = snapshot.data() as Record<string, any>;
   return {
-    id: snapshot.id,
     ...(data as CallSession),
+    id: snapshot.id,
   };
 };
 
@@ -86,8 +87,6 @@ export const createCallSession = async (
 ): Promise<CreateCallResult> => {
   const channelName = `${options.conversationId}-${Date.now()}`;
   const members = Array.from(new Set(options.members));
-  const initiatorAgoraUid = getAgoraUid(options.initiatorId);
-  const { token } = await requestAgoraToken(channelName, initiatorAgoraUid);
 
   const docRef = await addDoc(callsCollection, {
     conversationId: options.conversationId,
@@ -101,19 +100,12 @@ export const createCallSession = async (
     status: 'initiated' as CallStatus,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-    tokens: {
-      [options.initiatorId]: {
-        token,
-        agoraUid: initiatorAgoraUid,
-        issuedAt: serverTimestamp(),
-      },
-    },
+    signaling: {}, // WebRTC signaling data
     participants: {
       [options.initiatorId]: {
         id: options.initiatorId,
         displayName: options.initiatorName ?? null,
         state: 'invited',
-        agoraUid: initiatorAgoraUid,
         mutedAudio: false,
         mutedVideo: options.type === 'voice',
       },
@@ -123,8 +115,6 @@ export const createCallSession = async (
   return {
     callId: docRef.id,
     channelName,
-    token,
-    agoraUid: initiatorAgoraUid,
   };
 };
 
@@ -132,7 +122,7 @@ export const joinCallAsParticipant = async (
   callId: string,
   userId: string,
   displayName?: string | null,
-): Promise<{ token: string; agoraUid: number; channelName: string }> => {
+): Promise<{ channelName: string }> => {
   const callRef = doc(firestore, 'calls', callId);
   const snapshot = await getDoc(callRef);
   if (!snapshot.exists()) {
@@ -140,27 +130,17 @@ export const joinCallAsParticipant = async (
   }
 
   const data = snapshot.data() as CallSession;
-  const agoraUid = getAgoraUid(userId);
-  const { token } = await requestAgoraToken(data.channelName, agoraUid);
 
   await setDoc(
     callRef,
     {
       status: 'active',
       updatedAt: serverTimestamp(),
-      tokens: {
-        [userId]: {
-          token,
-          agoraUid,
-          issuedAt: serverTimestamp(),
-        },
-      },
       participants: {
         [userId]: {
           id: userId,
           displayName: displayName ?? null,
           state: 'joined',
-          agoraUid,
           mutedAudio: false,
           mutedVideo: data.type === 'voice',
           joinedAt: serverTimestamp(),
@@ -170,7 +150,7 @@ export const joinCallAsParticipant = async (
     { merge: true },
   );
 
-  return { token, agoraUid, channelName: data.channelName };
+  return { channelName: data.channelName };
 };
 
 export const updateParticipantMuteState = async (
@@ -196,11 +176,33 @@ export const markParticipantLeft = async (
   userId: string,
 ): Promise<void> => {
   const callRef = doc(firestore, 'calls', callId);
+
+  // First update the participant state
   await updateDoc(callRef, {
     [`participants.${userId}.state`]: 'left',
     [`participants.${userId}.leftAt`]: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+
+  // Check if all participants have left or declined, and end the call if so
+  const callSnap = await getDoc(callRef);
+  if (callSnap.exists()) {
+    const callData = callSnap.data() as CallSession;
+    const participants = callData.participants || {};
+
+    const allLeftOrDeclined = Object.values(participants).every(
+      (participant) => participant.state === 'left' || participant.state === 'declined'
+    );
+
+    if (allLeftOrDeclined && callData.status !== 'ended') {
+      await updateDoc(callRef, {
+        status: 'ended',
+        endedAt: serverTimestamp(),
+        endedBy: userId,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
 };
 
 export const declineCall = async (
@@ -209,6 +211,8 @@ export const declineCall = async (
   displayName?: string | null,
 ): Promise<void> => {
   const callRef = doc(firestore, 'calls', callId);
+
+  // First update the participant state
   await setDoc(
     callRef,
     {
@@ -224,6 +228,26 @@ export const declineCall = async (
     },
     { merge: true },
   );
+
+  // Check if all participants have left or declined, and end the call if so
+  const callSnap = await getDoc(callRef);
+  if (callSnap.exists()) {
+    const callData = callSnap.data() as CallSession;
+    const participants = callData.participants || {};
+
+    const allLeftOrDeclined = Object.values(participants).every(
+      (participant) => participant.state === 'left' || participant.state === 'declined'
+    );
+
+    if (allLeftOrDeclined && callData.status !== 'ended') {
+      await updateDoc(callRef, {
+        status: 'ended',
+        endedAt: serverTimestamp(),
+        endedBy: userId,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
 };
 
 export const endCall = async (
@@ -242,4 +266,65 @@ export const endCall = async (
     },
     { merge: true },
   );
+};
+
+// WebRTC Signaling functions
+export const sendOffer = async (
+  callId: string,
+  userId: string,
+  offer: RTCSessionDescription,
+): Promise<void> => {
+  const callRef = doc(firestore, 'calls', callId);
+  await updateDoc(callRef, {
+    [`signaling.${userId}.offer`]: offer,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+export const sendAnswer = async (
+  callId: string,
+  userId: string,
+  answer: RTCSessionDescription,
+): Promise<void> => {
+  const callRef = doc(firestore, 'calls', callId);
+  await updateDoc(callRef, {
+    [`signaling.${userId}.answer`]: answer,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+export const sendIceCandidate = async (
+  callId: string,
+  userId: string,
+  candidate: RTCIceCandidate,
+): Promise<void> => {
+  const callRef = doc(firestore, 'calls', callId);
+  const candidateData = {
+    candidate: candidate.candidate,
+    sdpMid: candidate.sdpMid,
+    sdpMLineIndex: candidate.sdpMLineIndex,
+  };
+  await updateDoc(callRef, {
+    [`signaling.${userId}.iceCandidates`]: arrayUnion(candidateData),
+    updatedAt: serverTimestamp(),
+  });
+};
+
+// Call history functions
+export const listenToCallHistory = (
+  userId: string,
+  callback: (calls: CallSession[]) => void,
+): Unsubscribe => {
+  const q = query(
+    callsCollection,
+    where('members', 'array-contains', userId),
+    orderBy('createdAt', 'desc'),
+    limit(50), // Limit to recent calls
+  );
+  return onSnapshot(q, (snapshot) => {
+    const calls = snapshot.docs
+      .map((docSnap) => normalizeCallSnapshot(docSnap as DocumentSnapshot<DocumentData>))
+      .filter((call): call is CallSession => Boolean(call));
+    callback(calls);
+  });
 };

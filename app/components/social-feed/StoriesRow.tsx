@@ -1,18 +1,19 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import {
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-  useWindowDimensions,
-  Image,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { onStoriesUpdate } from './storiesController';
 import { updateStreakForContext } from '@/lib/streaks/streakManager';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import {
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+    useWindowDimensions,
+    Animated,
+} from 'react-native';
+import { onStoriesUpdate } from './storiesController';
 
 interface Props {
   showAddStory?: boolean;
@@ -22,10 +23,14 @@ export default function StoriesRow({ showAddStory = false }: Props) {
   const router = useRouter();
   const { width } = useWindowDimensions();
   const [stories, setStories] = useState<any[]>([]);
+  const [pressedStory, setPressedStory] = useState<string | null>(null);
+
   // make item spacing responsive a bit
   const itemSize = width >= 420 ? 98 : 84;
   const avatarInner = Math.round(itemSize * 0.74);
   const ringSize = itemSize + 8;
+
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     const unsubscribe = onStoriesUpdate((rawStories) => {
@@ -62,6 +67,36 @@ export default function StoriesRow({ showAddStory = false }: Props) {
     router.push('/story-upload');
   };
 
+  const handleStoryPress = (story: any) => {
+    setPressedStory(story.id);
+    // Add haptic feedback here if available
+    Animated.sequence([
+      Animated.timing(scaleAnim, { toValue: 0.95, duration: 100, useNativeDriver: true }),
+      Animated.timing(scaleAnim, { toValue: 1, duration: 100, useNativeDriver: true }),
+    ]).start(() => {
+      router.push(`/story/${story.id}?photoURL=${encodeURIComponent(story.photoURL ?? '')}`);
+      void updateStreakForContext({
+        kind: 'story',
+        userId: story.userId,
+        username: story.username,
+      });
+      setPressedStory(null);
+    });
+  };
+
+  const formatTimeAgo = (timestamp: any) => {
+    if (!timestamp) return '';
+    const now = Date.now();
+    const storyTime = timestamp?.toMillis ? timestamp.toMillis() : timestamp;
+    const diff = now - storyTime;
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+
+    if (hours < 1) return 'now';
+    if (hours < 24) return `${hours}h`;
+    const days = Math.floor(hours / 24);
+    return `${days}d`;
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -73,7 +108,6 @@ export default function StoriesRow({ showAddStory = false }: Props) {
           <TouchableOpacity
             onPress={() => {
               handleStoryUpload();
-              void updateStreakForContext({ kind: 'story', userId: 'me', username: 'You' });
             }}
             style={styles.storyCard}
             activeOpacity={0.85}
@@ -118,63 +152,68 @@ export default function StoriesRow({ showAddStory = false }: Props) {
 
         {/* Other Stories */}
         {stories.map((story) => (
-          <TouchableOpacity
+          <Animated.View
             key={story.id}
-            style={styles.storyCard}
-            activeOpacity={0.92}
-            accessibilityRole="button"
-            accessibilityLabel={`${story.username}'s story`}
-            onPress={() => {
-              router.push(`/story/${story.id}?photoURL=${encodeURIComponent(story.photoURL ?? '')}`);
-              void updateStreakForContext({
-                kind: 'story',
-                userId: story.userId,
-                username: story.username,
-              });
+            style={{
+              transform: [{ scale: pressedStory === story.id ? scaleAnim : 1 }],
             }}
           >
-            <LinearGradient
-              colors={['#25D366', '#128C7E']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={[styles.statusRing, { width: ringSize, height: ringSize, borderRadius: ringSize / 2 }]}
+            <TouchableOpacity
+              style={styles.storyCard}
+              activeOpacity={0.92}
+              accessibilityRole="button"
+              accessibilityLabel={`${story.username}'s story`}
+              onPress={() => handleStoryPress(story)}
             >
-              <View
-                style={[
-                  styles.avatarInnerWrap,
-                  {
-                    width: avatarInner,
-                    height: avatarInner,
-                    borderRadius: avatarInner / 2,
-                  },
-                ]}
+              <LinearGradient
+                colors={
+                  pressedStory === story.id
+                    ? ['#128C7E', '#25D366']
+                    : ['#25D366', '#128C7E']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.statusRing, { width: ringSize, height: ringSize, borderRadius: ringSize / 2 }]}
               >
-                {story.photoURL ? (
-                  <Image
-                    source={{ uri: story.photoURL }}
-                    style={[
-                      styles.avatarImage,
-                      { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 },
-                    ]}
-                  />
-                ) : (
-                  <View
-                    style={[
-                      styles.avatar,
-                      { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 },
-                    ]}
-                  />
-                )}
+                <View
+                  style={[
+                    styles.avatarInnerWrap,
+                    {
+                      width: avatarInner,
+                      height: avatarInner,
+                      borderRadius: avatarInner / 2,
+                    },
+                  ]}
+                >
+                  {story.photoURL ? (
+                    <Image
+                      source={{ uri: story.photoURL }}
+                      style={[
+                        styles.avatarImage,
+                        { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 },
+                      ]}
+                    />
+                  ) : (
+                    <View
+                      style={[
+                        styles.avatar,
+                        { width: avatarInner, height: avatarInner, borderRadius: avatarInner / 2 },
+                      ]}
+                    />
+                  )}
+                </View>
+              </LinearGradient>
+              <Text style={styles.storyText} numberOfLines={1}>
+                {story.username}
+              </Text>
+              <View style={styles.metaRow}>
+                <View style={[styles.metaDot, pressedStory === story.id && styles.metaDotActive]} />
+                <Text style={styles.metaText}>
+                  {pressedStory === story.id ? 'Loading...' : 'Tap to view'}
+                </Text>
               </View>
-            </LinearGradient>
-            <Text style={styles.storyText} numberOfLines={1}>
-              {story.username}
-            </Text>
-            <View style={styles.metaRow}>
-              <View style={styles.metaDot} />
-              <Text style={styles.metaText}>Tap to view</Text>
-            </View>
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </Animated.View>
         ))}
       </ScrollView>
     </View>
@@ -254,6 +293,9 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: '#25D366',
     marginRight: 6,
+  },
+  metaDotActive: {
+    backgroundColor: '#FFD700',
   },
   metaText: {
     color: 'rgba(255,255,255,0.45)',

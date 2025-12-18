@@ -13,6 +13,8 @@ config.resolver = {
     ...config.resolver?.extraNodeModules,
     // If you need the form-data polyfill, keep this:
     'form-data': path.resolve(__dirname, 'polyfills/form-data.js'),
+    // URL.parse polyfill for p-stream providers
+    'url': path.resolve(__dirname, 'polyfills/url.js'),
   },
 };
 

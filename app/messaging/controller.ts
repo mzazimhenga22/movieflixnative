@@ -1,588 +1,1088 @@
 /* app/messaging/messagesController.tsx */
-import {
-  collection,
-  onSnapshot,
-  addDoc,
-  serverTimestamp,
-  query,
-  orderBy,
-  doc,
-  setDoc,
-  getDoc,
-  where,
-  getDocs,
-  limit,
-  arrayUnion,
-  arrayRemove,
-} from 'firebase/firestore';
-import { firestore, authPromise } from '../../constants/firebase';
+import { updateStreakForContext } from '@/lib/streaks/streakManager'
+import type { User } from 'firebase/auth'
 import {
   createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
   onAuthStateChanged,
-} from 'firebase/auth';
-import type { User } from 'firebase/auth';
-import { getDatabase, ref, onValue, set, onDisconnect } from "firebase/database";
-import { deleteDoc } from 'firebase/firestore';
+  signInWithEmailAndPassword,
+} from 'firebase/auth'
+
+import {
+  getDatabase,
+  onDisconnect,
+  onValue,
+  ref,
+  set,
+  serverTimestamp as rtdbServerTimestamp,
+  off,
+  DatabaseReference,
+} from 'firebase/database'
+
+import {
+  addDoc,
+  arrayRemove,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+  writeBatch,
+  startAfter,
+
+  // 🔹 ADD THESE
+  DocumentData,
+  Query,
+  QuerySnapshot,
+  QueryDocumentSnapshot,
+} from 'firebase/firestore'
+
+import { authPromise, firestore } from '../../constants/firebase'
 
 // ---- Types ----
 export type Conversation = {
-  id: string;
-  lastMessage?: string;
-  updatedAt?: any;
-  lastMessageSenderId?: string;
-  lastMessageHasMedia?: boolean;
-  pinned?: boolean;
-  muted?: boolean;
-  [key: string]: any;
-};
+  id: string
+  lastMessage?: string
+  updatedAt?: any
+  lastMessageSenderId?: string | null
+  lastMessageHasMedia?: boolean
+  pinned?: boolean
+  muted?: boolean
+
+  // NEW (safe): read tracking
+  lastReadAtBy?: Record<string, any>
+
+  // Group-specific fields
+  isGroup?: boolean
+  name?: string
+  description?: string
+  avatarUrl?: string
+  admins?: string[] // user IDs who are admins
+  creator?: string // user ID of group creator
+  inviteLink?: string
+  inviteLinkExpires?: any
+  privacy?: 'public' | 'private'
+  messageApproval?: boolean
+  autoDeleteMessages?: number // hours after which messages auto-delete
+  theme?: {
+    primaryColor?: string
+    backgroundImage?: string
+  }
+  rules?: string[]
+
+  [key: string]: any
+}
 
 export type Message = {
-  id: string;
-  text?: string;
-  createdAt?: any;
-  from?: string;
-  replyToMessageId?: string;
-  replyToText?: string;
-  replyToSenderId?: string;
-  deleted?: boolean;
-  deletedFor?: string[];
-  pinnedBy?: string[];
-  editedAt?: any;
-  [key: string]: any;
-};
+  id: string
+  text?: string
+  createdAt?: any
+  from?: string
+  replyToMessageId?: string
+  replyToText?: string
+  replyToSenderId?: string
+  replyToSenderName?: string
+  deleted?: boolean
+  deletedFor?: string[]
+  pinnedBy?: string[]
+  editedAt?: any
+  clientId?: string | null
+  status?: 'sending' | 'sent' | 'delivered' | 'read'
+  reactions?: { [emoji: string]: string[] } // emoji -> userIds
+  forwarded?: boolean
+  forwardedFrom?: string
+  mediaUrl?: string
+  mediaType?: 'image' | 'video' | 'audio' | 'file'
+  fileName?: string
+  fileSize?: number
+  [key: string]: any
+}
 
 export type Profile = {
-  id: string;
-  displayName: string;
-  photoURL: string;
-  status?: string;
-  isTyping?: boolean;
-};
+  id: string
+  displayName: string
+  photoURL: string
+  status?: string
+  isTyping?: boolean
+}
 
-type AuthCallback = (user: User | null) => void;
-type UnsubscribeFn = () => void;
+type AuthCallback = (user: User | null) => void
+type UnsubscribeFn = () => void
 
 /**
  * Internal helper: wait for auth to be ready and return it.
- * Always safe to call (will await initialization).
  */
 async function getAuth(): Promise<import('firebase/auth').Auth> {
-  return await authPromise;
+  return await authPromise
+}
+
+/** Helpers */
+const chunk = <T,>(arr: T[], size: number) =>
+  Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+    arr.slice(i * size, i * size + size),
+  )
+
+// --- Presence / Realtime DB (singletons for this module) ---
+const realtimeDb = getDatabase()
+
+let connectedRef: DatabaseReference | null = null
+let connectedHandler: ((snap: any) => void) | null = null
+let presenceUserRef: DatabaseReference | null = null
+let lastPresenceUid: string | null = null
+
+const detachPresenceListeners = () => {
+  if (connectedRef && connectedHandler) {
+    off(connectedRef, 'value', connectedHandler)
+  }
+  connectedRef = null
+  connectedHandler = null
+  presenceUserRef = null
 }
 
 // --- Authentication ---
-export const signUpWithEmail = async (email: string, password: string): Promise<User | null> => {
+export const signUpWithEmail = async (
+  email: string,
+  password: string,
+): Promise<User | null> => {
   try {
-    const auth = await getAuth();
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    console.log('[messagesController] signUpWithEmail success', userCredential.user.uid);
-    return userCredential.user as User;
+    const auth = await getAuth()
+    const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+    console.log('[messagesController] signUpWithEmail success', userCredential.user.uid)
+    return userCredential.user as User
   } catch (error: any) {
-    console.error('[messagesController] signUpWithEmail error:', error?.message ?? error);
-    return null;
+    console.error('[messagesController] signUpWithEmail error:', error?.message ?? error)
+    return null
   }
-};
+}
 
-export const signInWithEmail = async (email: string, password: string): Promise<User | null> => {
+export const signInWithEmail = async (
+  email: string,
+  password: string,
+): Promise<User | null> => {
   try {
-    const auth = await getAuth();
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    console.log('[messagesController] signInWithEmail success', userCredential.user.uid);
-    return userCredential.user as User;
+    const auth = await getAuth()
+    const userCredential = await signInWithEmailAndPassword(auth, email, password)
+    console.log('[messagesController] signInWithEmail success', userCredential.user.uid)
+    return userCredential.user as User
   } catch (error: any) {
-    console.error('[messagesController] signInWithEmail error:', error?.message ?? error);
-    return null;
+    console.error('[messagesController] signInWithEmail error:', error?.message ?? error)
+    return null
   }
-};
+}
 
 /**
- * onAuthChange: returns a safe unsubscribe function immediately.
- * If auth isn't ready yet, this attaches the listener once initialization completes.
+ * Presence + auth subscription:
+ * - Fixes offline not updating on sign-out
+ * - Uses RTDB serverTimestamp correctly
+ * - Avoids .info/connected listener leaks
+ * - Returns safe unsubscribe
  */
 export const onAuthChange = (callback: AuthCallback): UnsubscribeFn => {
-  let unsub: UnsubscribeFn = () => {};
-  let calledCallbackNull = false;
+  let unsubAuth: UnsubscribeFn = () => {}
+  let lastUid: string | null = null
 
-  // schedule a fallback to avoid UI stuck waiting — will be overridden by real onAuthStateChanged when ready
-  const fallbackTimer = setTimeout(() => {
-    if (!calledCallbackNull) {
-      calledCallbackNull = true;
-      callback(null);
-    }
-  }, 200);
-
-  // attach when auth initializes
   void authPromise
     .then((auth) => {
-      clearTimeout(fallbackTimer);
-      // ensure we haven't already invoked callback(null) as final state
-      const firebaseUnsub = onAuthStateChanged(auth, (user) => {
-        if (user) {
-          // User is signed in.
-          updateUserStatus(user.uid, 'online');
+      unsubAuth = onAuthStateChanged(auth, (user) => {
+        // If we had a previous user and now user is null => mark previous offline
+        if (!user && lastUid) {
+          void updateUserStatus(lastUid, 'offline')
+          lastUid = null
+          lastPresenceUid = null
+          detachPresenceListeners()
+          callback(null)
+          return
+        }
 
-          // Set up presence management
-          const db = getDatabase();
-          const userStatusDatabaseRef = ref(db, '/status/' + user.uid);
-          const isOfflineForDatabase = {
-            state: 'offline',
-            last_changed: serverTimestamp(),
-          };
-          const isOnlineForDatabase = {
-            state: 'online',
-            last_changed: serverTimestamp(),
-          };
+        if (!user?.uid) {
+          callback(null)
+          return
+        }
 
-          onValue(ref(db, '.info/connected'), (snapshot) => {
-            if (snapshot.val() === false) {
-              // Instead of simply returning, we'll persist the offline status
-              onDisconnect(userStatusDatabaseRef).set(isOfflineForDatabase).then(() => {
-                  updateUserStatus(user.uid, 'offline');
-              });
-              return;
-            }
+        // Signed in
+        lastUid = user.uid
+        lastPresenceUid = user.uid
 
-            onDisconnect(userStatusDatabaseRef).set(isOfflineForDatabase).then(() => {
-              set(userStatusDatabaseRef, isOnlineForDatabase);
-              updateUserStatus(user.uid, 'online');
-            });
-          });
-        } else {
-          // User is signed out.
-          const lastUser = auth.currentUser;
-          if (lastUser) {
-            updateUserStatus(lastUser.uid, 'offline');
+        // Firestore status update (optional but good)
+        void updateUserStatus(user.uid, 'online')
+
+        // Setup RTDB presence (clean old listeners)
+        detachPresenceListeners()
+
+        presenceUserRef = ref(realtimeDb, `/status/${user.uid}`)
+        connectedRef = ref(realtimeDb, '.info/connected')
+
+        const isOfflineForDatabase = {
+          state: 'offline',
+          last_changed: rtdbServerTimestamp(),
+        }
+        const isOnlineForDatabase = {
+          state: 'online',
+          last_changed: rtdbServerTimestamp(),
+        }
+
+        connectedHandler = (snapshot: any) => {
+          if (snapshot.val() === false) {
+            // Not connected: still persist "offline"
+            // (onDisconnect will run once connection exists)
+            void set(presenceUserRef!, isOfflineForDatabase)
+            void updateUserStatus(user.uid, 'offline')
+            return
           }
+
+          // When connected: ensure we go offline on disconnect, then mark online
+          onDisconnect(presenceUserRef!)
+            .set(isOfflineForDatabase)
+            .then(() => {
+              void set(presenceUserRef!, isOnlineForDatabase)
+              void updateUserStatus(user.uid, 'online')
+            })
+            .catch((e) => {
+              console.warn('[messagesController] onDisconnect setup failed', e)
+            })
         }
-        callback(user);
-      });
-      unsub = () => {
-        try {
-          (firebaseUnsub as unknown as () => void)();
-        } catch (e) {
-          // noop
-        }
-      };
+
+        onValue(connectedRef, connectedHandler)
+
+        callback(user)
+      })
     })
     .catch((err) => {
-      clearTimeout(fallbackTimer);
-      console.warn('[messagesController] onAuthChange: auth init failed', err);
-      // leave unsub as noop
-    });
+      console.warn('[messagesController] onAuthChange: auth init failed', err)
+      callback(null)
+    })
 
-  return () => unsub();
-};
+  return () => {
+    try {
+      unsubAuth()
+    } catch {}
+    detachPresenceListeners()
+  }
+}
 
 // --- Typing indicator helpers (Realtime DB) ---
-const realtimeDb = getDatabase();
-
 export const onUserTyping = (
   conversationId: string,
   userId: string,
-  callback: (typing: boolean) => void
+  callback: (typing: boolean) => void,
 ): UnsubscribeFn => {
-  const typingRef = ref(realtimeDb, `/typing/${conversationId}/${userId}`);
-  const unsubscribe = onValue(typingRef, (snap) => {
-    callback(!!snap.val());
-  });
-  return () => unsubscribe();
-};
+  const typingRef = ref(realtimeDb, `/typing/${conversationId}/${userId}`)
+  const handler = (snap: any) => callback(!!snap.val())
+
+  onValue(typingRef, handler)
+  return () => off(typingRef, 'value', handler)
+}
 
 export const setTyping = async (
   conversationId: string,
   userId: string,
-  typing: boolean
+  typing: boolean,
+  sendIndicator: boolean = true,
 ): Promise<void> => {
-  const typingRef = ref(realtimeDb, `/typing/${conversationId}/${userId}`);
-  await set(typingRef, typing);
-};
+  if (!sendIndicator) return
+  const typingRef = ref(realtimeDb, `/typing/${conversationId}/${userId}`)
+  await set(typingRef, typing)
+}
 
-// --- Firestore subscriptions (unchanged behavior but typed & logged) ---
-export const onConversationUpdate = (conversationId: string, callback: (conv: Conversation) => void): UnsubscribeFn => {
-  const docRef = doc(firestore, 'conversations', conversationId);
-  const unsubscribe = onSnapshot(docRef, (snap) => {
-    if (snap.exists()) {
-      callback({ id: snap.id, ...(snap.data() as Record<string, any>) } as Conversation);
-    } else {
-      callback({ id: snap.id } as Conversation);
-    }
-  }, (err) => {
-    console.error('[messagesController] onConversationUpdate snapshot error:', err);
-  });
-  return () => unsubscribe();
-};
+// --- Firestore subscriptions ---
+export const onConversationUpdate = (
+  conversationId: string,
+  callback: (conv: Conversation) => void,
+): UnsubscribeFn => {
+  const docRef = doc(firestore, 'conversations', conversationId)
+  const unsubscribe = onSnapshot(
+    docRef,
+    (snap) => {
+      if (snap.exists()) callback({ id: snap.id, ...(snap.data() as any) } as Conversation)
+      else callback({ id: snap.id } as Conversation)
+    },
+    (err) => console.error('[messagesController] onConversationUpdate snapshot error:', err),
+  )
+  return () => unsubscribe()
+}
 
 export const onConversationsUpdate = (callback: (conversations: Conversation[]) => void): UnsubscribeFn => {
-  const q = query(collection(firestore, 'conversations'), orderBy('updatedAt', 'desc'));
-  const unsubscribe = onSnapshot(q, (querySnapshot) => {
-    const conversations: Conversation[] = [];
-    querySnapshot.forEach((docSnap) => {
-      conversations.push({ id: docSnap.id, ...(docSnap.data() as Record<string, any>) } as Conversation);
-    });
-    callback(conversations);
-  }, (err) => {
-    console.error('[messagesController] onConversationsUpdate snapshot error:', err);
-  });
-  return () => unsubscribe();
-};
+  let unsub: UnsubscribeFn = () => {}
 
-export const onMessagesUpdate = (conversationId: string, callback: (messages: Message[]) => void): UnsubscribeFn => {
-  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages');
-  const q = query(messagesColRef, orderBy('createdAt', 'asc'));
+  void authPromise
+    .then((auth) => {
+      const uid = auth.currentUser?.uid
+      if (!uid) {
+        callback([])
+        return
+      }
 
-  const unsubscribe = onSnapshot(q, (querySnapshot) => {
-    const messages: Message[] = [];
-    querySnapshot.forEach((docSnap) => {
-      messages.push({ id: docSnap.id, ...(docSnap.data() as Record<string, any>) } as Message);
-    });
-    callback(messages);
-  }, (err) => {
-    console.error('[messagesController] onMessagesUpdate snapshot error:', err);
-  });
+      const q = query(
+        collection(firestore, 'conversations'),
+        where('members', 'array-contains', uid),
+        orderBy('updatedAt', 'desc'),
+      )
 
-  return () => unsubscribe();
-};
+      const snapUnsub = onSnapshot(
+        q,
+        (querySnapshot) => {
+          const conversations: Conversation[] = querySnapshot.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as any),
+          }))
+          callback(conversations)
+        },
+        (err) => console.error('[messagesController] onConversationsUpdate snapshot error:', err),
+      )
+
+      unsub = () => {
+        try {
+          snapUnsub()
+        } catch {}
+      }
+    })
+    .catch((err) => {
+      console.warn('[messagesController] onConversationsUpdate: auth init failed', err)
+      callback([])
+    })
+
+  return () => unsub()
+}
+
+/**
+ * Messages subscription:
+ * - Tightened: only last 50 for perf
+ * - Desc order (you can reverse in UI)
+ */
+export const onMessagesUpdate = (
+  conversationId: string,
+  callback: (messages: Message[]) => void,
+): UnsubscribeFn => {
+  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages')
+  const q = query(messagesColRef, orderBy('createdAt', 'desc'), limit(50))
+
+  const unsubscribe = onSnapshot(
+    q,
+    (querySnapshot) => {
+      const messages: Message[] = querySnapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as any),
+      }))
+      callback(messages) // UI can reverse if it wants oldest->newest
+    },
+    (err) => console.error('[messagesController] onMessagesUpdate snapshot error:', err),
+  )
+
+  return () => unsubscribe()
+}
 
 export const onUserProfileUpdate = (userId: string, callback: (profile: Profile) => void): UnsubscribeFn => {
-    const docRef = doc(firestore, 'users', userId);
-    const unsubscribe = onSnapshot(docRef, (snap) => {
-        if (snap.exists()) {
-            callback({ id: snap.id, ...snap.data() } as Profile);
-        }
-    });
-    return () => unsubscribe();
-};
+  const docRef = doc(firestore, 'users', userId)
+  const unsubscribe = onSnapshot(docRef, (snap) => {
+    if (snap.exists()) callback({ id: snap.id, ...(snap.data() as any) } as Profile)
+  })
+  return () => unsubscribe()
+}
 
-export const sendMessage = async (conversationId: string, message: Partial<Message>): Promise<void> => {
-  const auth = await getAuth();
-  if (!auth?.currentUser) return;
+/**
+ * sendMessage:
+ * - Uses batch to keep message + conversation summary consistent
+ */
+export const sendMessage = async (
+  conversationId: string,
+  message: Partial<Message> & { clientId?: string | null },
+): Promise<string | null> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) return null
+  const uid = auth.currentUser.uid
 
-  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages');
-  const newDoc = await addDoc(messagesColRef, {
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages')
+
+  const payload: Record<string, any> = {
     ...message,
-    from: auth.currentUser.uid,
+    from: uid,
     createdAt: serverTimestamp(),
-  });
+  }
+  if (message.clientId) payload.clientId = message.clientId
 
-  const conversationDocRef = doc(firestore, 'conversations', conversationId);
-  await setDoc(conversationDocRef, {
-    lastMessage: (message as any).text ?? '',
-    lastMessageSenderId: auth.currentUser.uid,
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-};
+  // Create message doc ref first so batch can write it
+  const newMessageRef = doc(messagesColRef) // auto-id
+  const batch = writeBatch(firestore)
+
+  batch.set(newMessageRef, payload)
+
+  batch.set(
+    conversationDocRef,
+    {
+      lastMessage: (message as any).text ?? '',
+      lastMessageSenderId: uid,
+      updatedAt: serverTimestamp(),
+      // optional: lastMessageHasMedia if you support media
+      // lastMessageHasMedia: Boolean((message as any).mediaUrl || (message as any).imageUrl),
+    },
+    { merge: true },
+  )
+
+  await batch.commit()
+
+  // Update chat streak
+  try {
+    const convSnap = await getDoc(conversationDocRef)
+    const members: string[] = (convSnap.exists() && (convSnap.data() as any).members) || []
+    const partnerId = members.find((m) => m !== uid) ?? null
+    void updateStreakForContext({
+      kind: 'chat',
+      conversationId,
+      partnerId: partnerId ?? null,
+      partnerName: null,
+    })
+  } catch (err) {
+    console.warn('[messagesController] failed to update chat streak', err)
+  }
+
+  return newMessageRef.id
+}
 
 export const deleteMessageForMe = async (
   conversationId: string,
   messageId: string,
   userId: string,
 ): Promise<void> => {
-  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
-  await setDoc(
-    messageDocRef,
-    {
-      deletedFor: arrayUnion(userId),
-    },
-    { merge: true },
-  );
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId)
+  await setDoc(messageDocRef, { deletedFor: arrayUnion(userId) }, { merge: true })
+  await recomputeConversationLastMessage(conversationId, userId)
+}
 
-  await recomputeConversationLastMessage(conversationId, userId);
-};
+export const deleteMessageForAll = async (conversationId: string, messageId: string): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId)
+  await setDoc(messageDocRef, { deleted: true }, { merge: true })
+  await recomputeConversationLastMessage(conversationId)
+}
 
-export const deleteMessageForAll = async (
-  conversationId: string,
-  messageId: string,
-): Promise<void> => {
-  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
-  await setDoc(
-    messageDocRef,
-    {
-      deleted: true,
-    },
-    { merge: true },
-  );
+export const pinMessage = async (conversationId: string, messageId: string, userId: string): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId)
+  await setDoc(messageDocRef, { pinnedBy: arrayUnion(userId) }, { merge: true })
+}
 
-  await recomputeConversationLastMessage(conversationId);
-};
+export const unpinMessage = async (conversationId: string, messageId: string, userId: string): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId)
+  await setDoc(messageDocRef, { pinnedBy: arrayRemove(userId) }, { merge: true })
+}
 
-export const pinMessage = async (
-  conversationId: string,
-  messageId: string,
-  userId: string,
-): Promise<void> => {
-  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
-  await setDoc(
-    messageDocRef,
-    {
-      pinnedBy: arrayUnion(userId),
-    },
-    { merge: true },
-  );
-};
-
-export const unpinMessage = async (
-  conversationId: string,
-  messageId: string,
-  userId: string,
-): Promise<void> => {
-  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
-  await setDoc(
-    messageDocRef,
-    {
-      pinnedBy: arrayRemove(userId),
-    },
-    { merge: true },
-  );
-};
-
-export const editMessage = async (
-  conversationId: string,
-  messageId: string,
-  newText: string,
-): Promise<void> => {
-  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId);
-  await setDoc(
-    messageDocRef,
-    {
-      text: newText,
-      editedAt: serverTimestamp(),
-    },
-    { merge: true },
-  );
-
-  await recomputeConversationLastMessage(conversationId);
-};
+export const editMessage = async (conversationId: string, messageId: string, newText: string): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId)
+  await setDoc(messageDocRef, { text: newText, editedAt: serverTimestamp() }, { merge: true })
+  await recomputeConversationLastMessage(conversationId)
+}
 
 export const setConversationPinned = async (conversationId: string, pinned: boolean): Promise<void> => {
-  const conversationDocRef = doc(firestore, 'conversations', conversationId);
-  await setDoc(conversationDocRef, { pinned }, { merge: true });
-};
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, { pinned }, { merge: true })
+}
 
-export const markConversationRead = async (conversationId: string): Promise<void> => {
-  const conversationDocRef = doc(firestore, 'conversations', conversationId);
+/**
+ * markConversationRead:
+ * - FIX: no longer destroys lastMessageSenderId
+ * - stores lastReadAtBy.{uid} = serverTimestamp()
+ * - respects read receipts setting
+ */
+export const markConversationRead = async (conversationId: string, sendReceipt: boolean = true): Promise<void> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) return
+  const uid = auth.currentUser.uid
+
+  if (!sendReceipt) return
+
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
   await setDoc(
     conversationDocRef,
     {
-      lastMessageSenderId: null,
+      [`lastReadAtBy.${uid}`]: serverTimestamp(),
     },
     { merge: true },
-  );
-};
+  )
+}
 
 export const deleteConversation = async (conversationId: string): Promise<void> => {
-  const conversationDocRef = doc(firestore, 'conversations', conversationId);
-  await deleteDoc(conversationDocRef);
-};
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await deleteDoc(conversationDocRef)
+}
 
+/**
+ * recomputeConversationLastMessage:
+ * - FIX: paginate until we find a visible message
+ * - avoids false "empty" when last 20 are deleted/hidden
+ */
 const recomputeConversationLastMessage = async (
   conversationId: string,
   viewerId?: string,
 ): Promise<void> => {
-  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages');
-  const qLatest = query(messagesColRef, orderBy('createdAt', 'desc'), limit(20));
-  const snapshot = await getDocs(qLatest);
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages')
 
-  let latest: Message | null = null;
-  snapshot.forEach((docSnap) => {
-    const data = { id: docSnap.id, ...(docSnap.data() as any) } as Message;
-    if (data.deleted) {
-      return;
-    }
-    if (viewerId && Array.isArray(data.deletedFor) && data.deletedFor.includes(viewerId)) {
-      return;
-    }
-    if (!latest) {
-      latest = data;
-    }
-  });
+  let cursor: QueryDocumentSnapshot<DocumentData> | null = null
+  let found: Message | null = null
+  let rounds = 0
 
-  const conversationDocRef = doc(firestore, 'conversations', conversationId);
+  while (!found && rounds < 6) {
+    rounds += 1
 
-  if (!latest) {
+    // ✅ Explicit type fixes TS7022
+const qLatest: Query<DocumentData> = cursor
+  ? query(messagesColRef, orderBy('createdAt', 'desc'), startAfter(cursor), limit(50))
+  : query(messagesColRef, orderBy('createdAt', 'desc'), limit(50))
+
+const snapshot: QuerySnapshot<DocumentData> = await getDocs(qLatest)
+
+    if (snapshot.empty) break
+
+    const docs: QueryDocumentSnapshot<DocumentData>[] = snapshot.docs
+    cursor = docs[docs.length - 1] ?? null
+
+    for (const docSnap of docs) {
+      const data = { id: docSnap.id, ...(docSnap.data() as any) } as Message
+
+      if (data.deleted) continue
+      if (viewerId && Array.isArray(data.deletedFor) && data.deletedFor.includes(viewerId)) continue
+
+      found = data
+      break
+    }
+
+    if (docs.length < 50) break
+  }
+
+  if (!found) {
     await setDoc(
       conversationDocRef,
-      {
-        lastMessage: '',
-        lastMessageSenderId: null,
-        updatedAt: serverTimestamp(),
-      },
+      { lastMessage: '', lastMessageSenderId: null, updatedAt: serverTimestamp() },
       { merge: true },
-    );
-    return;
+    )
+    return
   }
 
   await setDoc(
     conversationDocRef,
     {
-      lastMessage: latest.text ?? '',
-      lastMessageSenderId: latest.from ?? latest.sender ?? null,
+      lastMessage: (found as any).text ?? '',
+      lastMessageSenderId: (found as any).from ?? (found as any).sender ?? null,
       updatedAt: serverTimestamp(),
     },
     { merge: true },
-  );
-};
+  )
+}
 
+/**
+ * getFollowing:
+ * - FIX: chunks '__name__ in' into max 10
+ */
 export const getFollowing = async (): Promise<Profile[]> => {
-  const auth = await getAuth();
-  if (!auth?.currentUser) return [];
+  const auth = await getAuth()
+  if (!auth?.currentUser) return []
 
-  const userDocRef = doc(firestore, 'users', auth.currentUser.uid);
-  const userDoc = await getDoc(userDocRef);
-  const followingIds = userDoc.data()?.following || [];
+  const userDocRef = doc(firestore, 'users', auth.currentUser.uid)
+  const userDoc = await getDoc(userDocRef)
+  const followingIds: string[] = userDoc.data()?.following || []
 
-  if (followingIds.length === 0) return [];
+  if (followingIds.length === 0) return []
 
-  const usersRef = collection(firestore, 'users');
-  const q = query(usersRef, where('__name__', 'in', followingIds));
-  const querySnapshot = await getDocs(q);
+  const usersRef = collection(firestore, 'users')
+  const chunks = chunk(followingIds, 10)
+  const results: Profile[] = []
 
-  return querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Profile));
-};
+  for (const ids of chunks) {
+    const q = query(usersRef, where('__name__', 'in', ids))
+    const snap = await getDocs(q)
+    results.push(...snap.docs.map((d) => ({ ...(d.data() as any), id: d.id } as Profile)))
+  }
+
+  return results
+}
 
 export const getSuggestedPeople = async (): Promise<Profile[]> => {
-  const auth = await getAuth();
-  if (!auth?.currentUser) return [];
+  const auth = await getAuth()
+  if (!auth?.currentUser) return []
 
-  // Load current user's following
-  const userDocRef = doc(firestore, 'users', auth.currentUser.uid);
-  const userDoc = await getDoc(userDocRef);
-  const followingIds: string[] = userDoc.data()?.following || [];
+  const userDocRef = doc(firestore, 'users', auth.currentUser.uid)
+  const userDoc = await getDoc(userDocRef)
+  const followingIds: string[] = userDoc.data()?.following || []
 
-  // Base query: users who are not me
-  const usersRef = collection(firestore, 'users');
-  const q = query(usersRef, limit(50));
-  const snapshot = await getDocs(q);
+  const usersRef = collection(firestore, 'users')
+  const q = query(usersRef, limit(50))
+  const snapshot = await getDocs(q)
 
-  // Map to profiles with followerCount and sort by that
-  const candidates: Profile & { followerCount?: number }[] = snapshot.docs
+  const candidates: (Profile & { followerCount?: number })[] = snapshot.docs
     .map((docSnap) => {
-      const data = docSnap.data() as any;
+      const data = docSnap.data() as any
       return {
         id: docSnap.id,
         displayName: data.displayName,
         photoURL: data.photoURL,
         status: data.status,
         isTyping: false,
-        followerCount: Array.isArray(data.followers) ? data.followers.length : data.followersCount ?? 0,
-      };
+        followerCount: Array.isArray(data.followers)
+          ? data.followers.length
+          : data.followersCount ?? 0,
+      }
     })
-    .filter((p) => p.id !== auth.currentUser!.uid && !followingIds.includes(p.id));
+    .filter((p) => p.id !== auth.currentUser!.uid && !followingIds.includes(p.id))
 
-  candidates.sort((a, b) => (b.followerCount || 0) - (a.followerCount || 0));
-
-  // Return top 10 suggested people
-  return candidates.slice(0, 10);
-};
+  candidates.sort((a, b) => (b.followerCount || 0) - (a.followerCount || 0))
+  return candidates.slice(0, 10)
+}
 
 export const updateConversationStatus = async (conversationId: string, status: string): Promise<void> => {
-  const conversationDocRef = doc(firestore, 'conversations', conversationId);
-  await setDoc(conversationDocRef, {
-    status: status,
-  }, { merge: true });
-};
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, { status }, { merge: true })
+}
 
 export const createGroupConversation = async (options: {
-  name: string;
-  memberIds: string[];
-  avatarUrl?: string | null;
+  name: string
+  memberIds: string[]
+  avatarUrl?: string | null
+  description?: string
+  privacy?: 'public' | 'private'
 }): Promise<string> => {
-  const auth = await getAuth();
-  if (!auth?.currentUser) throw new Error('User not authenticated');
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
 
-  const uniqueMembers = Array.from(new Set([auth.currentUser.uid, ...options.memberIds]));
+  const uniqueMembers = Array.from(new Set([auth.currentUser.uid, ...options.memberIds]))
 
-  const conversationsRef = collection(firestore, 'conversations');
+  const conversationsRef = collection(firestore, 'conversations')
   const newConversation = await addDoc(conversationsRef, {
     isGroup: true,
     name: options.name || 'Group',
+    description: options.description || '',
     avatarUrl: options.avatarUrl || null,
     members: uniqueMembers,
+    admins: [auth.currentUser.uid], // creator is first admin
+    creator: auth.currentUser.uid,
+    privacy: options.privacy || 'private',
     updatedAt: serverTimestamp(),
     lastMessage: '',
     status: 'active',
-  });
+    lastMessageSenderId: null,
+  })
 
-  return newConversation.id;
-};
+  return newConversation.id
+}
 
 export const findOrCreateConversation = async (otherUser: Profile): Promise<string> => {
-  const auth = await getAuth();
-  if (!auth?.currentUser) throw new Error('User not authenticated');
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
 
-  const conversationsRef = collection(firestore, 'conversations');
-  const q = query(
-    conversationsRef,
-    where('members', 'array-contains', auth.currentUser.uid),
-    limit(30) // Adjust limit as needed
-  );
+  const conversationsRef = collection(firestore, 'conversations')
+  const indexKey = [auth.currentUser.uid, otherUser.id].sort().join(':')
 
-  const querySnapshot = await getDocs(q);
-  let conversationId: string | null = null;
+  const q = query(conversationsRef, where('indexKey', '==', indexKey), limit(1))
+  const querySnapshot = await getDocs(q)
+  if (!querySnapshot.empty) {
+    return querySnapshot.docs[0].id
+  }
 
-  querySnapshot.forEach(docSnap => {
-    const data = docSnap.data();
-    const members = Array.isArray(data.members) ? data.members : [];
-    const isGroup = !!data.isGroup;
+  const otherUserDocRef = doc(firestore, 'users', otherUser.id)
+  const otherUserDoc = await getDoc(otherUserDocRef)
+  const otherUserFollowing = otherUserDoc.data()?.following || []
+  const isFollowingBack = otherUserFollowing.includes(auth.currentUser.uid)
 
-    // Only treat as an existing 1:1 conversation if:
-    // - it isn't marked as a group, and
-    // - it has exactly the two participant ids
-    if (!isGroup && members.length === 2 && members.includes(otherUser.id)) {
-      conversationId = docSnap.id;
-    }
-  });
+  const currentUserDocRef = doc(firestore, 'users', auth.currentUser.uid)
+  const currentUserDoc = await getDoc(currentUserDocRef)
+  const currentUserFollowing = currentUserDoc.data()?.following || []
+  const isFollowing = currentUserFollowing.includes(otherUser.id)
 
-  if (conversationId) return conversationId;
-
-  const otherUserDocRef = doc(firestore, 'users', otherUser.id);
-  const otherUserDoc = await getDoc(otherUserDocRef);
-  const otherUserFollowing = otherUserDoc.data()?.following || [];
-  const isFollowingBack = otherUserFollowing.includes(auth.currentUser.uid);
-
-  const currentUserDocRef = doc(firestore, 'users', auth.currentUser.uid);
-  const currentUserDoc = await getDoc(currentUserDocRef);
-  const currentUserFollowing = currentUserDoc.data()?.following || [];
-  const isFollowing = currentUserFollowing.includes(otherUser.id);
-
-  const initialStatus = isFollowing && isFollowingBack ? 'active' : 'pending';
+  const initialStatus = isFollowing && isFollowingBack ? 'active' : 'pending'
 
   const newConversation = await addDoc(conversationsRef, {
     members: [auth.currentUser.uid, otherUser.id],
+    indexKey,
     updatedAt: serverTimestamp(),
     lastMessage: '',
     status: initialStatus,
-  });
+    lastMessageSenderId: null,
+  })
 
-  return newConversation.id;
-};
+  return newConversation.id
+}
 
 export const updateUserStatus = async (userId: string, status: string): Promise<void> => {
-    const userDocRef = doc(firestore, 'users', userId);
-    await setDoc(userDocRef, {
-        status: status,
-        lastSeen: serverTimestamp(),
-    }, { merge: true });
-};
+  const userDocRef = doc(firestore, 'users', userId)
+  await setDoc(
+    userDocRef,
+    { status, lastSeen: serverTimestamp() },
+    { merge: true },
+  )
+}
 
 export const findUserByUsername = async (username: string): Promise<Profile | null> => {
-  const usersRef = collection(firestore, 'users');
-  const q = query(usersRef, where('displayName', '==', username), limit(1));
-  const querySnapshot = await getDocs(q);
-
-  if (querySnapshot.empty) {
-    return null;
-  }
-
-  const userDoc = querySnapshot.docs[0];
-  return { ...userDoc.data(), id: userDoc.id } as Profile;
-};
+  const usersRef = collection(firestore, 'users')
+  const q = query(usersRef, where('displayName', '==', username), limit(1))
+  const querySnapshot = await getDocs(q)
+  if (querySnapshot.empty) return null
+  const userDoc = querySnapshot.docs[0]
+  return { ...(userDoc.data() as any), id: userDoc.id } as Profile
+}
 
 export const getProfileById = async (userId: string): Promise<Profile | null> => {
-  const userDocRef = doc(firestore, 'users', userId);
-  const userDoc = await getDoc(userDocRef);
-  if (!userDoc.exists()) return null;
-  return { id: userDoc.id, ...(userDoc.data() as Record<string, any>) } as Profile;
-};
+  const userDocRef = doc(firestore, 'users', userId)
+  const userDoc = await getDoc(userDocRef)
+  if (!userDoc.exists()) return null
+  return { id: userDoc.id, ...(userDoc.data() as any) } as Profile
+}
 
-export default {};
+// New functions for WhatsApp-like features
+
+export const addMessageReaction = async (
+  conversationId: string,
+  messageId: string,
+  emoji: string,
+  userId: string,
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId)
+  await setDoc(messageDocRef, {
+    [`reactions.${emoji}`]: arrayUnion(userId)
+  }, { merge: true })
+}
+
+export const removeMessageReaction = async (
+  conversationId: string,
+  messageId: string,
+  emoji: string,
+  userId: string,
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId)
+  await setDoc(messageDocRef, {
+    [`reactions.${emoji}`]: arrayRemove(userId)
+  }, { merge: true })
+}
+
+export const forwardMessage = async (
+  fromConversationId: string,
+  messageId: string,
+  toConversationIds: string[],
+  userId: string,
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', fromConversationId, 'messages', messageId)
+  const messageSnap = await getDoc(messageDocRef)
+  if (!messageSnap.exists()) return
+
+  const originalMessage = { id: messageSnap.id, ...(messageSnap.data() as any) } as Message
+
+  const forwardPayload: Partial<Message> = {
+    text: originalMessage.text,
+    mediaUrl: originalMessage.mediaUrl,
+    mediaType: originalMessage.mediaType,
+    fileName: originalMessage.fileName,
+    fileSize: originalMessage.fileSize,
+    forwarded: true,
+    forwardedFrom: originalMessage.from,
+    from: userId,
+    createdAt: serverTimestamp(),
+  }
+
+  for (const toConversationId of toConversationIds) {
+    await sendMessage(toConversationId, forwardPayload)
+  }
+}
+
+export const updateMessageStatus = async (
+  conversationId: string,
+  messageId: string,
+  status: 'sent' | 'delivered' | 'read',
+): Promise<void> => {
+  const messageDocRef = doc(firestore, 'conversations', conversationId, 'messages', messageId)
+  await setDoc(messageDocRef, { status }, { merge: true })
+}
+
+export const markMessagesDelivered = async (conversationId: string, userId: string): Promise<void> => {
+  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages')
+  const q = query(messagesColRef, where('from', '!=', userId), where('status', 'in', ['sent']))
+  const snapshot = await getDocs(q)
+
+  const batch = writeBatch(firestore)
+  snapshot.docs.forEach((docSnap) => {
+    batch.update(docSnap.ref, { status: 'delivered' })
+  })
+  await batch.commit()
+}
+
+export const markMessagesRead = async (conversationId: string, userId: string): Promise<void> => {
+  const messagesColRef = collection(firestore, 'conversations', conversationId, 'messages')
+  const q = query(messagesColRef, where('from', '!=', userId), where('status', 'in', ['sent', 'delivered']))
+  const snapshot = await getDocs(q)
+
+  const batch = writeBatch(firestore)
+  snapshot.docs.forEach((docSnap) => {
+    batch.update(docSnap.ref, { status: 'read' })
+  })
+  await batch.commit()
+}
+
+export const getLastSeen = async (userId: string): Promise<Date | null> => {
+  const userDocRef = doc(firestore, 'users', userId)
+  const userDoc = await getDoc(userDocRef)
+  if (!userDoc.exists()) return null
+
+  const data = userDoc.data() as any
+  if (data.lastSeen && typeof data.lastSeen.toDate === 'function') {
+    return data.lastSeen.toDate()
+  }
+  return null
+}
+
+export const muteConversation = async (conversationId: string, muted: boolean): Promise<void> => {
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, { muted }, { merge: true })
+}
+
+export const archiveConversation = async (conversationId: string, archived: boolean): Promise<void> => {
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, { archived }, { merge: true })
+}
+
+// Group management functions
+export const addGroupAdmin = async (conversationId: string, userId: string): Promise<void> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  // Check if current user is admin
+  const convSnap = await getDoc(doc(firestore, 'conversations', conversationId))
+  if (!convSnap.exists()) throw new Error('Conversation not found')
+
+  const convData = convSnap.data() as Conversation
+  if (!convData.admins?.includes(auth.currentUser.uid)) {
+    throw new Error('Only admins can manage group admins')
+  }
+
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, { admins: arrayUnion(userId) }, { merge: true })
+}
+
+export const removeGroupAdmin = async (conversationId: string, userId: string): Promise<void> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  // Check if current user is admin
+  const convSnap = await getDoc(doc(firestore, 'conversations', conversationId))
+  if (!convSnap.exists()) throw new Error('Conversation not found')
+
+  const convData = convSnap.data() as Conversation
+  if (!convData.admins?.includes(auth.currentUser.uid)) {
+    throw new Error('Only admins can manage group admins')
+  }
+
+  // Cannot remove the creator
+  if (userId === convData.creator) {
+    throw new Error('Cannot remove group creator from admins')
+  }
+
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, { admins: arrayRemove(userId) }, { merge: true })
+}
+
+export const addGroupMember = async (conversationId: string, userId: string): Promise<void> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, { members: arrayUnion(userId) }, { merge: true })
+}
+
+export const removeGroupMember = async (conversationId: string, userId: string): Promise<void> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  // Check if current user is admin or the member themselves
+  const convSnap = await getDoc(doc(firestore, 'conversations', conversationId))
+  if (!convSnap.exists()) throw new Error('Conversation not found')
+
+  const convData = convSnap.data() as Conversation
+  const isAdmin = convData.admins?.includes(auth.currentUser.uid)
+  const isSelf = auth.currentUser.uid === userId
+
+  if (!isAdmin && !isSelf) {
+    throw new Error('Only admins can remove other members')
+  }
+
+  // Cannot remove the creator
+  if (userId === convData.creator) {
+    throw new Error('Cannot remove group creator')
+  }
+
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  const batch = writeBatch(firestore)
+
+  batch.set(conversationDocRef, { members: arrayRemove(userId) }, { merge: true })
+
+  // If removing an admin, also remove from admins list
+  if (convData.admins?.includes(userId)) {
+    batch.set(conversationDocRef, { admins: arrayRemove(userId) }, { merge: true })
+  }
+
+  await batch.commit()
+}
+
+export const updateGroupSettings = async (
+  conversationId: string,
+  updates: Partial<Pick<Conversation, 'name' | 'description' | 'avatarUrl' | 'privacy' | 'messageApproval' | 'autoDeleteMessages' | 'theme' | 'rules'>>
+): Promise<void> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  // Check if current user is admin
+  const convSnap = await getDoc(doc(firestore, 'conversations', conversationId))
+  if (!convSnap.exists()) throw new Error('Conversation not found')
+
+  const convData = convSnap.data() as Conversation
+  if (!convData.admins?.includes(auth.currentUser.uid)) {
+    throw new Error('Only admins can update group settings')
+  }
+
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, updates, { merge: true })
+}
+
+export const leaveGroup = async (conversationId: string): Promise<void> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  const convSnap = await getDoc(doc(firestore, 'conversations', conversationId))
+  if (!convSnap.exists()) throw new Error('Conversation not found')
+
+  const convData = convSnap.data() as Conversation
+
+  // Cannot leave if you're the creator
+  if (auth.currentUser.uid === convData.creator) {
+    throw new Error('Group creator cannot leave the group')
+  }
+
+  await removeGroupMember(conversationId, auth.currentUser.uid)
+}
+
+export const generateGroupInviteLink = async (conversationId: string, expiresInHours: number = 24): Promise<string> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  // Check if current user is admin
+  const convSnap = await getDoc(doc(firestore, 'conversations', conversationId))
+  if (!convSnap.exists()) throw new Error('Conversation not found')
+
+  const convData = convSnap.data() as Conversation
+  if (!convData.admins?.includes(auth.currentUser.uid)) {
+    throw new Error('Only admins can generate invite links')
+  }
+
+  const inviteCode = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+  const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000)
+
+  const conversationDocRef = doc(firestore, 'conversations', conversationId)
+  await setDoc(conversationDocRef, {
+    inviteLink: inviteCode,
+    inviteLinkExpires: expiresAt
+  }, { merge: true })
+
+  return inviteCode
+}
+
+export const joinGroupWithInvite = async (inviteCode: string): Promise<string | null> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  const conversationsRef = collection(firestore, 'conversations')
+  const q = query(conversationsRef, where('inviteLink', '==', inviteCode))
+  const snapshot = await getDocs(q)
+
+  if (snapshot.empty) {
+    throw new Error('Invalid invite link')
+  }
+
+  const conversationDoc = snapshot.docs[0]
+  const convData = conversationDoc.data() as Conversation
+
+  // Check if link is expired
+  if (convData.inviteLinkExpires && convData.inviteLinkExpires.toDate() < new Date()) {
+    throw new Error('Invite link has expired')
+  }
+
+  // Check if already a member
+  if (convData.members?.includes(auth.currentUser.uid)) {
+    return conversationDoc.id
+  }
+
+  // Add user to group
+  await addGroupMember(conversationDoc.id, auth.currentUser.uid)
+
+  return conversationDoc.id
+}
+
+export const createGroupPoll = async (
+  conversationId: string,
+  question: string,
+  options: string[]
+): Promise<string> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  const pollsRef = collection(firestore, 'conversations', conversationId, 'polls')
+  const pollData = {
+    question,
+    options: options.map(option => ({ text: option, votes: [] })),
+    createdBy: auth.currentUser.uid,
+    createdAt: serverTimestamp(),
+    voters: []
+  }
+
+  const pollDoc = await addDoc(pollsRef, pollData)
+  return pollDoc.id
+}
+
+export const voteInPoll = async (
+  conversationId: string,
+  pollId: string,
+  optionIndex: number
+): Promise<void> => {
+  const auth = await getAuth()
+  if (!auth?.currentUser) throw new Error('User not authenticated')
+
+  const pollDocRef = doc(firestore, 'conversations', conversationId, 'polls', pollId)
+  const pollSnap = await getDoc(pollDocRef)
+
+  if (!pollSnap.exists()) {
+    throw new Error('Poll not found')
+  }
+
+  const pollData = pollSnap.data() as any
+  const userId = auth.currentUser.uid
+
+  // Remove previous vote if exists
+  const updatedOptions = pollData.options.map((option: any, index: number) => {
+    if (index === optionIndex) {
+      return { ...option, votes: arrayUnion(userId) }
+    } else {
+      return { ...option, votes: arrayRemove(userId) }
+    }
+  })
+
+  await setDoc(pollDocRef, {
+    options: updatedOptions,
+    voters: arrayUnion(userId)
+  }, { merge: true })
+}
+
+export const sendMentionMessage = async (
+  conversationId: string,
+  text: string,
+  mentionedUserIds: string[]
+): Promise<string | null> => {
+  const message: Partial<Message> = {
+    text,
+    mentionedUserIds,
+    createdAt: serverTimestamp(),
+  }
+
+  return await sendMessage(conversationId, message)
+}
+
+export default {}

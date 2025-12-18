@@ -7,10 +7,11 @@ export interface Media {
   first_air_date?: string;
   vote_average?: number;
   genre_ids?: number[];
-  backdrop_path?: string; // Add this
-  overview?: string;      // Add this
+  backdrop_path?: string;
+  overview?: string;
   media_type?: 'movie' | 'tv';
   imdb_id?: string | null;
+  adult?: boolean;
   seasonNumber?: number;
   episodeNumber?: number;
   seasonTitle?: string;

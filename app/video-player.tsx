@@ -1,36 +1,36 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-const FALLBACK_EPISODE_IMAGE = 'https://via.placeholder.com/160x90?text=Episode';
-import {
-  View,
-  StyleSheet,
-  StatusBar,
-  TouchableOpacity,
-  Text,
-  TextInput,
-  FlatList,
-  Image,
-  ScrollView,
-  Alert,
-  Animated,
-  ActivityIndicator,
-  PanResponder,
-} from 'react-native';
-import { Video, ResizeMode, AVPlaybackStatusSuccess, AVPlaybackSource } from 'expo-av';
-import * as ScreenOrientation from 'expo-screen-orientation';
-import * as Brightness from 'expo-brightness';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import Slider from '@react-native-community/slider';
-import { LinearGradient } from 'expo-linear-gradient';
+﻿import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { collection, addDoc, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore';
+import Slider from '@react-native-community/slider';
+import { AVPlaybackSource, AVPlaybackStatusSuccess, ResizeMode, Video } from 'expo-av';
+import * as Brightness from 'expo-brightness';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Animated,
+    FlatList,
+    Image,
+    PanResponder,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 import { firestore } from '../constants/firebase';
 import { useUser } from '../hooks/use-user';
+import { logInteraction } from '../lib/algo';
+import { syncMovieMatchProfile } from '../lib/movieMatchSync';
+import { buildProfileScopedKey, getStoredActiveProfile, type StoredProfile } from '../lib/profileStorage';
 import { usePStream } from '../src/pstream/usePStream';
 import type { Media } from '../types';
-import { buildProfileScopedKey, getStoredActiveProfile, type StoredProfile } from '../lib/profileStorage';
-import { syncMovieMatchProfile } from '../lib/movieMatchSync';
-
+const FALLBACK_EPISODE_IMAGE = 'https://via.placeholder.com/160x90?text=Episode';
 type UpcomingEpisode = {
   id?: number;
   title?: string;
@@ -44,7 +44,6 @@ type UpcomingEpisode = {
   episodeTmdbId?: number;
   seasonEpisodeCount?: number;
 };
-
 type CaptionSource = {
   id: string;
   type: 'srt' | 'vtt';
@@ -52,20 +51,17 @@ type CaptionSource = {
   language?: string;
   display?: string;
 };
-
 type PlaybackSource = {
   uri: string;
   headers?: Record<string, string>;
   streamType?: string;
   captions?: CaptionSource[];
 };
-
 type CaptionCue = {
   start: number;
   end: number;
   text: string;
 };
-
 type AudioTrackOption = {
   id: string;
   name?: string;
@@ -73,7 +69,6 @@ type AudioTrackOption = {
   groupId?: string;
   isDefault?: boolean;
 };
-
 type QualityOption = {
   id: string;
   label: string;
@@ -81,9 +76,10 @@ type QualityOption = {
   resolution?: string;
   bandwidth?: number;
 };
-
 const SOURCE_BASE_ORDER = [
   'cuevana3',
+  'wecima',
+  'tugaflix',
   'ridomovies',
   'hdrezka',
   'warezcdn',
@@ -91,7 +87,6 @@ const SOURCE_BASE_ORDER = [
   'soapertv',
   'autoembed',
   'myanime',
-  'tugaflix',
   'ee3',
   'fsharetv',
   'vidsrc',
@@ -106,7 +101,6 @@ const SOURCE_BASE_ORDER = [
   'streambox',
   'nunflix',
   '8stream',
-  'wecima',
   'animeflv',
   'cinemaos',
   'nepu',
@@ -126,8 +120,10 @@ const SOURCE_BASE_ORDER = [
   'debrid',
   'cinehdplus',
 ];
-
 const GENERAL_PRIORITY_SOURCE_IDS = [
+  'cuevana3',
+  'wecima',
+  'tugaflix',
   'zoechip',
   'vidsrc',
   'vidsrcvip',
@@ -136,23 +132,18 @@ const GENERAL_PRIORITY_SOURCE_IDS = [
   'pirxcy',
   'insertunit',
   'streambox',
-  'cuevana3',
   'primewire',
   'debrid',
   'movies4f',
   'hdrezka',
   'soapertv',
 ];
-
 const ANIME_PRIORITY_SOURCE_IDS = ['animetsu', 'animeflv', 'zunime', 'myanime'];
-
 const CONTROLS_HIDE_DELAY_PLAYING = 10500;
 const CONTROLS_HIDE_DELAY_PAUSED = 16500;
 const SURFACE_DOUBLE_TAP_MS = 350;
 const buildScrapeDebugTag = (kind: string, title: string) => (__DEV__ ? `[${kind}] ${title}` : undefined);
-
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value));
-
 type SlidableVerticalControlProps = {
   icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
   label: string;
@@ -160,25 +151,34 @@ type SlidableVerticalControlProps = {
   onValueChange: (val: number) => void;
   onInteraction?: () => void;
   height?: number;
+  tintColor?: string;
 };
-
 const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
   icon,
   label,
   value,
   onValueChange,
   onInteraction,
-  height = 150,
+  height = 180,
 }) => {
   const startValueRef = useRef(0);
-
+  const valueRef = useRef(value);
+  // keep latest value in a ref so handlers can read it without recreating the
+  // PanResponder on every value update (prevents re-binding and improves
+  // responsiveness while dragging/tapping)
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
   const panResponder = useMemo(
     () =>
       PanResponder.create({
+        // ✅ capture touch so the parent TouchableOpacity doesn't steal it
         onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
         onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
         onPanResponderGrant: () => {
-          startValueRef.current = value;
+          startValueRef.current = valueRef.current;
           onInteraction?.();
         },
         onPanResponderMove: (_evt, gesture) => {
@@ -186,38 +186,98 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
           const next = clamp01(startValueRef.current + delta);
           onValueChange(next);
         },
+        // ✅ don't allow termination (prevents snap-back)
         onPanResponderTerminationRequest: () => false,
+        // ✅ keep current value as new baseline
+        onPanResponderRelease: () => {
+          startValueRef.current = valueRef.current;
+        },
+        onPanResponderTerminate: () => {
+          startValueRef.current = valueRef.current;
+        },
       }),
-    [height, onInteraction, onValueChange, value],
+    [height, onInteraction, onValueChange],
   );
-
-  const percentageLabel = `${Math.round(value * 100)}%`;
-
   return (
-    <View {...panResponder.panHandlers}>
-      <LinearGradient
-        colors={['rgba(32,34,45,0.95)', 'rgba(14,16,26,0.85)']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.glassCard}
-      >
-        <View style={styles.glassCardHeader}>
-          <MaterialCommunityIcons name={icon} size={22} color="#fff" />
-          <Text style={styles.glassCardLabel}>{label}</Text>
+    <View {...panResponder.panHandlers} style={styles.ccWrapper}>
+      <View style={[styles.ccTrack, { height }]}>
+        <View style={[styles.ccFill, { height: `${value * 100}%` }]} />
+        <View style={styles.ccIconWrap}>
+          <MaterialCommunityIcons name={icon} size={26} color="#fff" />
         </View>
-        <View style={[styles.verticalSliderWrap, { height }]}>
-          <View style={styles.sliderValueChip}>
-            <Text style={styles.sliderValueText}>{percentageLabel}</Text>
-          </View>
-          <View pointerEvents="none">
-            <Slider
-              style={styles.verticalSlider}
-              minimumValue={0}
-              maximumValue={1}
-              step={0.01}
-              value={value}
-              onValueChange={onValueChange}
-              minimumTrackTintColor="#ff5f6d"
+      </View>
+      <Text style={styles.ccLabel}>{label}</Text>
+    </View>
+  );
+};
+const VideoPlayerScreen = () => {
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const roomCode = typeof params.roomCode === 'string' ? params.roomCode : undefined;
+  const passedVideoUrl = typeof params.videoUrl === 'string' ? params.videoUrl : undefined;
+  const passedStreamType = typeof params.streamType === 'string' ? params.streamType : undefined;
+  const rawHeaders = typeof params.videoHeaders === 'string' ? params.videoHeaders : undefined;
+  const rawTitle = typeof params.title === 'string' ? params.title : undefined;
+  const displayTitle = rawTitle && rawTitle.trim().length > 0 ? rawTitle : 'Now Playing';
+  const rawMediaType = typeof params.mediaType === 'string' ? params.mediaType : undefined;
+  const isTvShow = rawMediaType === 'tv';
+  const normalizedMediaType = isTvShow ? 'tv' : 'movie';
+  const tmdbId = typeof params.tmdbId === 'string' ? params.tmdbId : undefined;
+  const imdbId = typeof params.imdbId === 'string' ? params.imdbId : undefined;
+  const rawPosterPath = typeof params.posterPath === 'string' ? params.posterPath : undefined;
+  const rawBackdropPath = typeof params.backdropPath === 'string' ? params.backdropPath : undefined;
+  const rawOverview = typeof params.overview === 'string' ? params.overview : undefined;
+  const rawReleaseDateParam = typeof params.releaseDate === 'string' ? params.releaseDate : undefined;
+  const parsedVoteAverageParam =
+    typeof params.voteAverage === 'string' ? parseFloat(params.voteAverage) : NaN;
+  const voteAverageValue = Number.isFinite(parsedVoteAverageParam) ? parsedVoteAverageParam : undefined;
+  const rawGenreIdsParam = typeof params.genreIds === 'string' ? params.genreIds : undefined;
+  const parsedReleaseYear = typeof params.releaseYear === 'string' ? parseInt(params.releaseYear, 10) : undefined;
+  const releaseYear = typeof parsedReleaseYear === 'number' && Number.isFinite(parsedReleaseYear)
+    ? parsedReleaseYear
+    : undefined;
+  const contentHintParam = typeof params.contentHint === 'string' ? params.contentHint : undefined;
+  const preferAnimeSources = contentHintParam === 'anime';
+  const parseNumericParam = (value?: string) => {
+    if (!value) return undefined;
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+  const seasonNumberParam = parseNumericParam(
+    typeof params.seasonNumber === 'string' ? params.seasonNumber : undefined,
+  );
+  const episodeNumberParam = parseNumericParam(
+    typeof params.episodeNumber === 'string' ? params.episodeNumber : undefined,
+  );
+  const seasonTmdbId = typeof params.seasonTmdbId === 'string' ? params.seasonTmdbId : undefined;
+  const episodeTmdbId = typeof params.episodeTmdbId === 'string' ? params.episodeTmdbId : undefined;
+  const seasonTitleParam = typeof params.seasonTitle === 'string' ? params.seasonTitle : undefined;
+  const seasonEpisodeCountParam = parseNumericParam(
+    typeof params.seasonEpisodeCount === 'string' ? params.seasonEpisodeCount : undefined,
+  );
+  const initialSeasonNumber = isTvShow ? seasonNumberParam ?? undefined : undefined;
+  const initialEpisodeNumber = isTvShow ? episodeNumberParam ?? undefined : undefined;
+  const initialSeasonTitleValue = isTvShow
+    ? seasonTitleParam ?? (initialSeasonNumber ? `Season ${initialSeasonNumber}` : undefined)
+    : undefined;
+  const upcomingEpisodes = useMemo<UpcomingEpisode[]>(() => {
+    const serialized = typeof params.upcomingEpisodes === 'string' ? params.upcomingEpisodes : undefined;
+    if (!serialized) return [];
+    try {
+      const parsed = JSON.parse(serialized);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [params.upcomingEpisodes]);
+  const parsedGenreIds = useMemo(() => {
+    if (!rawGenreIdsParam) return undefined;
+    return rawGenreIdsParam
+      .split(',')
+      .map(segment => parseInt(segment.trim(), 10))
+      .filter(value => Number.isFinite(value));
+  }, [rawGenreIdsParam]);
+  const parsedTmdbNumericId = useMemo(() => {
     if (!tmdbId) return null;
     const numeric = parseInt(tmdbId, 10);
     return Number.isFinite(numeric) ? numeric : null;
@@ -242,21 +302,17 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
   const [activeProfile, setActiveProfile] = useState<StoredProfile | null>(null);
   const videoRef = useRef<Video | null>(null);
   const [activeTitle, setActiveTitle] = useState(displayTitle);
-
   useEffect(() => {
     setActiveTitle(displayTitle);
   }, [displayTitle]);
-
   const [isPlaying, setIsPlaying] = useState(true);
   const [showControls, setShowControls] = useState(true);
   const [controlsSession, setControlsSession] = useState(0);
   const lastSurfaceTapRef = useRef(0);
-
   const [positionMillis, setPositionMillis] = useState(0);
   const [durationMillis, setDurationMillis] = useState(0);
   const [seekPosition, setSeekPosition] = useState(0);
   const [isSeeking, setIsSeeking] = useState(false);
-
   const [brightness, setBrightness] = useState(1);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [volume, setVolume] = useState(1);
@@ -267,7 +323,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
   const [chatInput, setChatInput] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const [showChat, setShowChat] = useState(true);
-
   const [videoReloadKey, setVideoReloadKey] = useState(0);
   const watchHistoryEntry = useMemo<Media | null>(() => {
     if (!parsedTmdbNumericId) return null;
@@ -313,17 +368,31 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
   const [selectedCaptionId, setSelectedCaptionId] = useState<'off' | string>('off');
   const [captionLoadingId, setCaptionLoadingId] = useState<string | null>(null);
   const [activeCaptionText, setActiveCaptionText] = useState<string | null>(null);
+  const [isLocked, setIsLocked] = useState(false);
+  const [isMini, setIsMini] = useState(false);
+  const captionPreferenceKeyRef = useRef<string | null>(null);
   const [audioTrackOptions, setAudioTrackOptions] = useState<AudioTrackOption[]>([]);
   const [selectedAudioKey, setSelectedAudioKey] = useState<string>('auto');
   const [qualityOptions, setQualityOptions] = useState<QualityOption[]>([]);
   const [selectedQualityId, setSelectedQualityId] = useState<string>('auto');
   const [qualityOverrideUri, setQualityOverrideUri] = useState<string | null>(null);
   const [qualityLoadingId, setQualityLoadingId] = useState<string | null>(null);
-  const [isBufferingVideo, setIsBufferingVideo] = useState(false);
+  const [showBufferingOverlay, setShowBufferingOverlay] = useState(false);
+  const bufferingOverlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevPositionRef = useRef<number>(0);
+  const lastAdvanceTsRef = useRef<number>(Date.now());
   const [avDrawerOpen, setAvDrawerOpen] = useState(false);
   useEffect(() => {
     watchEntryRef.current = watchHistoryEntry;
   }, [watchHistoryEntry]);
+  useEffect(() => {
+    return () => {
+      if (bufferingOverlayTimeoutRef.current) {
+        clearTimeout(bufferingOverlayTimeoutRef.current);
+        bufferingOverlayTimeoutRef.current = null;
+      }
+    };
+  }, []);
   const bumpControlsLife = useCallback(() => setControlsSession(prev => prev + 1), []);
   const sourceOrder = useMemo(() => buildSourceOrder(preferAnimeSources), [preferAnimeSources]);
   const updateActiveCaption = useCallback(
@@ -388,10 +457,12 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
         if (!active) return;
         setActiveProfile(profile ?? null);
         setWatchHistoryKey(buildProfileScopedKey('watchHistory', profile?.id ?? undefined));
+        captionPreferenceKeyRef.current = buildProfileScopedKey('preferredCaptionTrack', profile?.id ?? undefined);
       } catch {
         if (active) {
           setActiveProfile(null);
           setWatchHistoryKey('watchHistory');
+          captionPreferenceKeyRef.current = 'preferredCaptionTrack';
         }
       }
     };
@@ -410,7 +481,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
   useEffect(() => {
     if (playbackSource || !tmdbId || !rawMediaType) return;
     let isCancelled = false;
-
     const fetchPlaybackFromMetadata = async () => {
       const fallbackYear = releaseYear ?? new Date().getFullYear();
       const mediaTitle = displayTitle || 'Now Playing';
@@ -447,6 +517,7 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
           const debugTag = buildScrapeDebugTag('initial-tv', mediaTitle);
           const playback = await scrapeInitial(payload, { sourceOrder, debugTag });
           if (isCancelled) return;
+          console.log('[VideoPlayer] Scrape success', { uri: playback.uri, streamType: playback.stream?.type, headers: playback.headers });
           setPlaybackSource({
             uri: playback.uri,
             headers: playback.headers,
@@ -520,7 +591,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
         ]);
       }
     };
-
     fetchPlaybackFromMetadata();
     return () => {
       isCancelled = true;
@@ -565,7 +635,7 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     !!qualityLoadingId ||
     isFetchingStream ||
     isInitialStreamPending ||
-    (videoPlaybackSource && isBufferingVideo && !scrapeError);
+    (videoPlaybackSource && showBufferingOverlay && !scrapeError);
   let loaderMessage = 'Fetching stream...';
   if (qualityLoadingId) {
     loaderMessage = 'Switching quality...';
@@ -573,7 +643,7 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     loaderMessage = scrapingEpisode ? 'Loading next episode...' : 'Fetching stream...';
   } else if (isInitialStreamPending) {
     loaderMessage = 'Preparing stream...';
-  } else if (videoPlaybackSource && isBufferingVideo) {
+  } else if (videoPlaybackSource && showBufferingOverlay) {
     loaderMessage = 'Buffering stream...';
   }
   const isBlockingLoader = Boolean(qualityLoadingId || isFetchingStream || isInitialStreamPending);
@@ -582,19 +652,16 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
   const hasAudioOptions = audioTrackOptions.length > 0;
   const hasQualityOptions = qualityOptions.length > 0;
   const avControlsEnabled = hasSubtitleOptions || hasAudioOptions || hasQualityOptions;
-
   useEffect(() => {
     if (!avControlsEnabled && avDrawerOpen) {
       setAvDrawerOpen(false);
     }
   }, [avControlsEnabled, avDrawerOpen]);
-
   useEffect(() => {
     if (!showControls && avDrawerOpen) {
       setAvDrawerOpen(false);
     }
   }, [showControls, avDrawerOpen]);
-
   useEffect(() => {
     if (!isHlsSource || !playbackSource?.uri) {
       setAudioTrackOptions([]);
@@ -603,11 +670,41 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     }
     let cancelled = false;
     const controller = new AbortController();
-    const manifestUrl = masterPlaylistRef.current ?? playbackSource.uri;
+    let manifestUrl = masterPlaylistRef.current ?? playbackSource.uri;
+
+    // If it's a proxy URL, try to extract and fetch the original URL directly
+    let originalUrl: string | null = null;
+    try {
+      const urlObj = new URL(manifestUrl);
+      if (urlObj.hostname === 'proxy.pstream.mov' && urlObj.pathname === '/m3u8-proxy') {
+        const encodedUrl = urlObj.searchParams.get('url');
+        if (encodedUrl) {
+          originalUrl = decodeURIComponent(encodedUrl);
+          manifestUrl = originalUrl;
+        }
+      }
+    } catch {}
+
     const fetchManifest = async () => {
       try {
+        const browserHeaders = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'DNT': '1',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-User': '?1',
+          'Cache-Control': 'max-age=0',
+          'Referer': 'https://www.google.com/',
+          ...((playbackSource.headers as Record<string, string>) || {}),
+        };
         const res = await fetch(manifestUrl, {
-          headers: playbackSource.headers,
+          headers: browserHeaders,
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -619,13 +716,12 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
         setQualityOptions(parseHlsQualityOptions(text, manifestUrl));
       } catch (err) {
         if (!cancelled) {
-          console.warn('Failed to parse master manifest', err);
+          console.warn('Failed to parse master manifest', { url: manifestUrl, proxyUsed: originalUrl !== null, error: err });
           setAudioTrackOptions([]);
           setQualityOptions([]);
         }
       }
     };
-
     fetchManifest();
     return () => {
       cancelled = true;
@@ -633,6 +729,51 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     };
   }, [isHlsSource, playbackSource?.uri, playbackSource?.headers]);
 
+// Base64 encode headers like providers-temp does
+function encodeHeaders(headers: Record<string, string>): string {
+  try {
+    return Buffer.from(JSON.stringify(headers)).toString('base64');
+  } catch {
+    // Fallback if Buffer not available
+    return btoa(JSON.stringify(headers));
+  }
+}
+  function normalizeLang(lang?: string) {
+  if (!lang) return undefined;
+  return lang.toLowerCase().split('-')[0];
+}
+
+useEffect(() => {
+  if (!audioTrackOptions.length) return;
+  const video = videoRef.current;
+  if (!video) return;
+
+  // Respect manual selection
+  if (selectedAudioKey !== 'auto') return;
+
+  // Prefer English
+  let chosen = audioTrackOptions.find((t) => normalizeLang(t.language) === 'en') ??
+               audioTrackOptions.find((t) => (t.name || '').toLowerCase().includes('english'));
+
+  // If no English, fall back to default or first track
+  if (!chosen) {
+    chosen = audioTrackOptions.find((t) => t.isDefault) ?? audioTrackOptions[0];
+  }
+
+  if (!chosen) return;
+
+  setSelectedAudioKey(chosen.id);
+
+  if (chosen.language && chosen.language !== 'und') {
+    (video as any).setStatusAsync({
+      selectedAudioTrack: { type: 'language', value: chosen.language },
+    }).catch(() => {});
+  } else {
+    (video as any).setStatusAsync({
+      selectedAudioTrack: { type: 'system' },
+    }).catch(() => {});
+  }
+}, [audioTrackOptions]);
   // lock orientation + setup brightness
   useEffect(() => {
     const setup = async () => {
@@ -640,7 +781,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
         await ScreenOrientation.lockAsync(
           ScreenOrientation.OrientationLock.LANDSCAPE
         );
-
         await Brightness.requestPermissionsAsync();
         const current = await Brightness.getBrightnessAsync();
         setBrightness(current);
@@ -648,26 +788,21 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
         console.warn('Video setup error', e);
       }
     };
-
     setup();
-
     return () => {
       Brightness.restoreSystemBrightnessAsync();
       ScreenOrientation.unlockAsync();
     };
   }, []);
-
   // apply brightness
   useEffect(() => {
     Brightness.setBrightnessAsync(brightness).catch(() => {});
   }, [brightness]);
-
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.setVolumeAsync(volume).catch(() => {});
   }, [volume]);
-
   // auto-hide controls when playing
   useEffect(() => {
     if (!showControls || episodeDrawerOpen) return;
@@ -675,7 +810,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     const timeout = setTimeout(() => setShowControls(false), delay);
     return () => clearTimeout(timeout);
   }, [showControls, isPlaying, episodeDrawerOpen, controlsSession]);
-
   const persistWatchProgress = useCallback(
     async (
       positionValue: number,
@@ -742,6 +876,9 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                   : enriched.first_air_date ?? null,
             },
           });
+          try {
+            void logInteraction({ type: 'watch', actorId: user.uid, targetId: enriched.id, meta: { progress: progressValue } });
+          } catch {}
         }
       } catch (err) {
         console.warn('Failed to update watch history', err);
@@ -749,21 +886,51 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     },
     [watchHistoryKey, user?.uid, user?.displayName, user?.email, activeProfile?.id, activeProfile?.name, activeProfile?.avatarColor, activeProfile?.photoURL],
   );
-
   const handleStatusUpdate = (status: AVPlaybackStatusSuccess | any) => {
     if (!status || !status.isLoaded) return;
-
-    setIsPlaying(status.isPlaying ?? false);
-    setIsBufferingVideo(status.isBuffering ?? false);
-
+    const playingNow = Boolean(status.isPlaying);
+    const bufferingNow = Boolean(status.isBuffering);
+    setIsPlaying(playingNow);
+    const currentPos = status.positionMillis || 0;
+    // detect progress: if position advanced by >300ms, update last advance timestamp
+    try {
+      if (typeof prevPositionRef.current === 'number') {
+        if (currentPos - prevPositionRef.current > 300) {
+          lastAdvanceTsRef.current = Date.now();
+        }
+      }
+    } catch {}
+    prevPositionRef.current = currentPos;
+    // Show buffering overlay only when buffering persists and playback is effectively stalled
+    if (bufferingNow && !isSeeking) {
+      if (!bufferingOverlayTimeoutRef.current) {
+        const startPos = currentPos;
+        const startTs = Date.now();
+        bufferingOverlayTimeoutRef.current = setTimeout(() => {
+          // If position hasn't advanced since timeout started (or lastAdvance was before timeout), show overlay
+          const now = Date.now();
+          const advancedRecently = now - lastAdvanceTsRef.current < 700;
+          if (!advancedRecently) {
+            setShowBufferingOverlay(true);
+          }
+          bufferingOverlayTimeoutRef.current = null;
+        }, 650);
+      }
+    } else {
+      if (bufferingOverlayTimeoutRef.current) {
+        clearTimeout(bufferingOverlayTimeoutRef.current);
+        bufferingOverlayTimeoutRef.current = null;
+      }
+      if (showBufferingOverlay) {
+        setShowBufferingOverlay(false);
+      }
+    }
     const currentPosition = status.positionMillis || 0;
     if (!isSeeking) {
       setSeekPosition(currentPosition);
     }
-
     setPositionMillis(currentPosition);
     updateActiveCaption(currentPosition);
-
     if (status.durationMillis) {
       setDurationMillis(status.durationMillis);
     }
@@ -775,7 +942,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
       });
     }
   };
-
   useEffect(() => {
     return () => {
       if (positionMillis > 0 && durationMillis > 0) {
@@ -783,24 +949,30 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
       }
     };
   }, [positionMillis, durationMillis, persistWatchProgress]);
-
   const togglePlayPause = async () => {
     const video = videoRef.current;
     if (!video) return;
-
     bumpControlsLife();
-    if (isPlaying) {
-      await video.pauseAsync();
-      setShowControls(true);
-    } else {
-      await video.playAsync();
+    try {
+      if (isPlaying) {
+        await video.pauseAsync();
+        setShowControls(true);
+      } else {
+        await video.playAsync();
+      }
+    } catch (err: any) {
+      console.warn('Playback failed', err);
+      const msg = err?.message || String(err);
+      if (msg.toLowerCase().includes('audiofocus') || msg.toLowerCase().includes('audio focus') || msg.includes('AudioFocusNotAcquiredException')) {
+        Alert.alert('Playback blocked', 'This app is currently in the background, so audio focus could not be acquired. Please bring the app to the foreground and try again.');
+      } else {
+        Alert.alert('Playback error', msg);
+      }
     }
   };
-
   const seekBy = async (deltaMillis: number) => {
     const video = videoRef.current;
     if (!video) return;
-
     bumpControlsLife();
     const next = Math.max(
       0,
@@ -809,40 +981,32 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     await video.setPositionAsync(next);
     setSeekPosition(next);
   };
-
   const handleRateToggle = async () => {
     const video = videoRef.current;
     if (!video) return;
-
     bumpControlsLife();
     // cycle through 1x, 1.5x, 2x
     const nextRate = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
     setPlaybackRate(nextRate);
     await video.setRateAsync(nextRate, true);
   };
-
   const formatTime = (millis: number) => {
     const totalSeconds = Math.floor(millis / 1000);
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
-
   const currentTimeLabel = formatTime(positionMillis);
   const totalTimeLabel = durationMillis ? formatTime(durationMillis) : '0:00';
-
   useEffect(() => {
     if (!isTvShow) {
       setEpisodeDrawerOpen(false);
     }
   }, [isTvShow]);
-
   useEffect(() => {
     if (!roomCode) return;
-
     const messagesRef = collection(firestore, 'watchParties', roomCode, 'messages');
     const q = query(messagesRef, orderBy('createdAt', 'asc'));
-
     const unsub = onSnapshot(q, (snapshot) => {
       const items: Array<{ id: string; user: string; text: string; createdAt?: any; avatar?: string | null }> = [];
       snapshot.forEach((docSnap) => {
@@ -857,12 +1021,18 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
       });
       setChatMessages(items);
     });
-
     return () => unsub();
   }, [roomCode]);
-
   const handleSurfacePress = useCallback(() => {
     if (episodeDrawerOpen) return;
+    if (isLocked) return; // when locked, ignore surface taps
+    if (isMini) {
+      // tapping mini player expands to full
+      setIsMini(false);
+      setShowControls(true);
+      bumpControlsLife();
+      return;
+    }
     const now = Date.now();
     if (showControls && now - lastSurfaceTapRef.current < SURFACE_DOUBLE_TAP_MS) {
       setShowControls(false);
@@ -872,14 +1042,11 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     setShowControls(true);
     bumpControlsLife();
   }, [episodeDrawerOpen, showControls, bumpControlsLife]);
-
   const handleSendChat = async () => {
     if (!roomCode || !chatInput.trim() || chatSending) return;
-
     const text = chatInput.trim();
     setChatInput('');
     setChatSending(true);
-
     try {
       const messagesRef = collection(firestore, 'watchParties', roomCode, 'messages');
       await addDoc(messagesRef, {
@@ -895,7 +1062,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
       setChatSending(false);
     }
   };
-
   const handleBrightnessChange = useCallback(
     (value: number) => {
       setBrightness(value);
@@ -903,7 +1069,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     },
     [bumpControlsLife],
   );
-
   const handleVolumeChange = useCallback(
     (value: number) => {
       setVolume(value);
@@ -911,7 +1076,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     },
     [bumpControlsLife],
   );
-
   const handleQualitySelect = useCallback(
     async (option: QualityOption | null) => {
       if (!playbackSource) return;
@@ -938,54 +1102,11 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     },
     [playbackSource, selectedQualityId, qualityOverrideUri],
   );
-
-  const renderVerticalSlider = useCallback(
-    (
-      icon: React.ComponentProps<typeof MaterialCommunityIcons>['name'],
-      label: string,
-      value: number,
-      onValueChange: (val: number) => void,
-    ) => {
-      const percentageLabel = `${Math.round(value * 100)}%`;
-      return (
-        <LinearGradient
-          colors={['rgba(32,34,45,0.95)', 'rgba(14,16,26,0.85)']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={styles.glassCard}
-        >
-          <View style={styles.glassCardHeader}>
-            <MaterialCommunityIcons name={icon} size={22} color="#fff" />
-            <Text style={styles.glassCardLabel}>{label}</Text>
-          </View>
-          <View style={styles.verticalSliderWrap}>
-            <View style={styles.sliderValueChip}>
-              <Text style={styles.sliderValueText}>{percentageLabel}</Text>
-            </View>
-            <Slider
-              style={styles.verticalSlider}
-              minimumValue={0}
-              maximumValue={1}
-              step={0.01}
-              value={value}
-              onValueChange={onValueChange}
-              minimumTrackTintColor="#ff5f6d"
-              maximumTrackTintColor="rgba(255,255,255,0.22)"
-              thumbTintColor="#ffffff"
-            />
-          </View>
-        </LinearGradient>
-      );
-    },
-    [],
-  );
-
   const getCaptionLabel = useCallback((caption: CaptionSource) => {
     if (caption.display) return caption.display;
     if (caption.language) return caption.language.toUpperCase();
     return 'Subtitle';
   }, []);
-
   const handleCaptionSelect = useCallback(
     async (captionId: string | 'off') => {
       bumpControlsLife();
@@ -994,6 +1115,10 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
         captionIndexRef.current = 0;
         captionCuesRef.current = [];
         setActiveCaptionText(null);
+        const key = captionPreferenceKeyRef.current;
+        if (key) {
+          await AsyncStorage.setItem(key, 'off').catch(() => {});
+        }
         return;
       }
       if (selectedCaptionId === captionId && captionCuesRef.current.length) {
@@ -1002,6 +1127,10 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
       const source = captionSources.find((item) => item.id === captionId);
       if (!source) return;
       setSelectedCaptionId(captionId);
+      const key = captionPreferenceKeyRef.current;
+      if (key) {
+        await AsyncStorage.setItem(key, captionId).catch(() => {});
+      }
       const cached = captionCacheRef.current[captionId];
       if (cached) {
         captionCuesRef.current = cached;
@@ -1030,30 +1159,61 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     },
     [captionSources, positionMillis, selectedCaptionId, updateActiveCaption, bumpControlsLife],
   );
-
   const handleAudioSelect = useCallback(
-    async (option: AudioTrackOption | null) => {
-      bumpControlsLife();
-      setSelectedAudioKey(option?.id ?? 'auto');
-      const video = videoRef.current;
-      if (!video) return;
-      try {
-        if (option?.language) {
-          await (video as any).setStatusAsync({
-            selectedAudioTrack: { type: 'language', value: option.language },
-          });
-        } else {
-          await (video as any).setStatusAsync({
-            selectedAudioTrack: { type: 'system' },
-          });
-        }
-      } catch (err) {
-        console.warn('Audio track switch failed', err);
-      }
-    },
-    [bumpControlsLife],
-  );
+  async (option: AudioTrackOption | null) => {
+    bumpControlsLife();
+    const video = videoRef.current;
+    if (!video) return;
 
+    setSelectedAudioKey(option?.id ?? 'auto');
+
+    try {
+      if (option?.language && option.language !== 'und') {
+        await (video as any).setStatusAsync({
+          selectedAudioTrack: {
+            type: 'language',
+            value: option.language,
+          },
+        });
+      } else {
+        await (video as any).setStatusAsync({
+          selectedAudioTrack: { type: 'system' },
+        });
+      }
+    } catch (err) {
+      console.warn('Audio track switch failed', err);
+    }
+  },
+  [bumpControlsLife],
+);
+  useEffect(() => {
+    if (!captionSources.length) return;
+    let cancelled = false;
+    const pickDefaultCaption = async () => {
+      const prefKey = captionPreferenceKeyRef.current;
+      const stored = prefKey ? await AsyncStorage.getItem(prefKey).catch(() => null) : null;
+      if (cancelled) return;
+      // Respect user's explicit "off" choice.
+      if (stored === 'off') {
+        return;
+      }
+      const currentStillValid =
+        selectedCaptionId !== 'off' && captionSources.some((s) => s.id === selectedCaptionId);
+      if (currentStillValid) {
+        return;
+      }
+      const storedStillValid = stored ? captionSources.find((s) => s.id === stored) : undefined;
+      const english = captionSources.find((s) => (s.language || '').toLowerCase().startsWith('en'));
+      const candidate = storedStillValid ?? english ?? captionSources[0];
+      if (candidate?.id) {
+        await handleCaptionSelect(candidate.id);
+      }
+    };
+    void pickDefaultCaption();
+    return () => {
+      cancelled = true;
+    };
+  }, [captionSources, handleCaptionSelect, selectedCaptionId]);
   const handleEpisodePlay = async (episode: UpcomingEpisode, index: number) => {
     if (!isTvShow) return;
     if (!tmdbId) {
@@ -1070,21 +1230,18 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
           : typeof seasonNumberParam === 'number'
           ? seasonNumberParam
           : 1;
-
       const normalizedEpisodeNumber =
         typeof episode.episodeNumber === 'number'
           ? episode.episodeNumber
           : typeof episodeNumberParam === 'number'
           ? episodeNumberParam
           : 1;
-
       const derivedSeasonEpisodeCount =
         typeof episode.seasonEpisodeCount === 'number'
           ? episode.seasonEpisodeCount
           : typeof seasonEpisodeCountParam === 'number'
           ? seasonEpisodeCountParam
           : undefined;
-
       const payload = {
         type: 'show',
         title: displayTitle,
@@ -1102,11 +1259,9 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
           tmdbId: episode.episodeTmdbId?.toString() ?? '',
         },
       } as const;
-
       console.log('[VideoPlayer] Episode scrape payload', payload);
       const debugTag = buildScrapeDebugTag('episode', nextTitle || displayTitle);
       const playback = await scrapeEpisode(payload, { sourceOrder, debugTag });
-
       setPlaybackSource({
         uri: playback.uri,
         headers: playback.headers,
@@ -1153,7 +1308,7 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
       Alert.alert('Episode unavailable', err?.message || 'Unable to load this episode.');
     }
   };
-
+  
   return (
     <View style={styles.container}>
       <StatusBar hidden />
@@ -1181,9 +1336,12 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
             )}
           </View>
         )}
-
-        {shouldShowMovieFlixLoader && <MovieFlixLoader message={loaderMessage} variant={loaderVariant} />}
-
+        {shouldShowMovieFlixLoader && (
+          <MovieFlixLoader
+            message={loaderMessage === 'Buffering stream...' ? '' : loaderMessage}
+            variant={loaderVariant}
+          />
+        )}
         {showControls && (
           <View style={styles.overlay}>
             {/* Top fade */}
@@ -1191,13 +1349,11 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
               colors={['rgba(0,0,0,0.8)', 'transparent']}
               style={styles.topGradient}
             />
-
             {/* Bottom fade */}
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.9)']}
               style={styles.bottomGradient}
             />
-
             {/* TOP BAR */}
             <View style={styles.topBar}>
               <View style={styles.topLeft}>
@@ -1207,7 +1363,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                 >
                   <Ionicons name="chevron-back" size={20} color="#fff" />
                 </TouchableOpacity>
-
                 <View style={styles.titleWrap}>
                   <Text style={styles.title}>{activeTitle}</Text>
                   {roomCode ? (
@@ -1215,7 +1370,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                   ) : null}
                 </View>
               </View>
-
               <View style={styles.topRight}>
                 <TouchableOpacity style={styles.roundButton}>
                   <MaterialCommunityIcons name="thumb-down-outline" size={22} color="#fff" />
@@ -1248,15 +1402,19 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                 ) : null}
               </View>
             </View>
-
             {/* MIDDLE CONTROLS + CHAT */}
             <View style={styles.middleRow}>
               <View style={[styles.sideCluster, styles.sideClusterLeft]}>
                 <View style={styles.sideRail}>
-                  {renderVerticalSlider('white-balance-sunny', 'Brightness', brightness, handleBrightnessChange)}
+                  <SlidableVerticalControl
+  icon="white-balance-sunny"
+  label="Brightness"
+  value={brightness}
+  tintColor="rgba(255,200,80,0.35)"
+  onValueChange={handleBrightnessChange}
+/>
                 </View>
               </View>
-
               {/* Central playback controls */}
               <View style={styles.centerControlsWrap}>
                 <View style={styles.centerControls}>
@@ -1267,7 +1425,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                     <MaterialCommunityIcons name="rewind-10" size={26} color="#fff" />
                     <Text style={styles.seekLabel}>10s</Text>
                   </TouchableOpacity>
-
                   <TouchableOpacity
                     onPress={togglePlayPause}
                     style={styles.iconCircle}
@@ -1278,7 +1435,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                       color="#fff"
                     />
                   </TouchableOpacity>
-
                   <TouchableOpacity
                     style={styles.iconCircleSmall}
                     onPress={() => seekBy(10000)}
@@ -1288,7 +1444,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                   </TouchableOpacity>
                 </View>
               </View>
-
               <View style={[styles.sideCluster, styles.sideClusterRight]}>
                 {/* Watch party chat (only when in a room) */}
                 {roomCode && showChat ? (
@@ -1342,13 +1497,17 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                 ) : (
                 <View style={styles.middleRightPlaceholder} />
               )}
-
                 <View style={[styles.sideRail, styles.rightSideRail]}>
-                  {renderVerticalSlider('volume-high', 'Volume', volume, handleVolumeChange)}
+                  <SlidableVerticalControl
+  icon="volume-high"
+  label="Volume"
+  value={volume}
+  tintColor="rgba(120,130,255,0.35)"
+  onValueChange={handleVolumeChange}
+/>
                 </View>
               </View>
             </View>
-
             {episodeDrawerOpen && isTvShow && episodeQueue.length > 0 && (
               <View style={styles.episodeDrawer}>
                 <View style={styles.episodeDrawerHeader}>
@@ -1406,7 +1565,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                 </ScrollView>
               </View>
             )}
-
             {avDrawerOpen && (
               <View style={styles.avDrawer}>
                 <View style={styles.avDrawerHeader}>
@@ -1459,7 +1617,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                       <Text style={styles.avEmptyCopy}>No subtitles detected</Text>
                     )}
                   </View>
-
                   <View style={styles.avDrawerColumn}>
                     <Text style={styles.avDrawerColumnTitle}>Audio</Text>
                     {hasAudioOptions ? (
@@ -1502,7 +1659,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                       <Text style={styles.avEmptyCopy}>No alternate audio</Text>
                     )}
                   </View>
-
                   <View style={styles.avDrawerColumn}>
                     <Text style={styles.avDrawerColumnTitle}>Quality</Text>
                     {hasQualityOptions ? (
@@ -1554,48 +1710,41 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                 </View>
               </View>
             )}
-
             {/* BOTTOM BAR */}
             <View style={styles.bottomControls}>
               {/* Progress */}
               <View style={styles.progressRow}>
-                <View style={styles.progressContainer}>
-                  <LinearGradient
-                    colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.02)']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.progressGradient}
-                  >
-                    <Slider
-                      style={styles.progressBar}
-                      minimumValue={0}
-                      maximumValue={durationMillis || 1}
-                      value={seekPosition}
-                      onSlidingStart={() => {
-                        setIsSeeking(true);
-                        bumpControlsLife();
-                      }}
-                      onValueChange={val => {
-                        setSeekPosition(val);
-                        bumpControlsLife();
-                      }}
-                      onSlidingComplete={async val => {
-                        setIsSeeking(false);
-                        await videoRef.current?.setPositionAsync(val);
-                        bumpControlsLife();
-                      }}
-                      minimumTrackTintColor="#ff5f6d"
-                      maximumTrackTintColor="rgba(255,255,255,0.2)"
-                      thumbTintColor="#fff"
-                    />
-                  </LinearGradient>
-                </View>
                 <View style={styles.progressLabels}>
                   <Text style={styles.timeText}>{currentTimeLabel}</Text>
                   <Text style={styles.timeText}>{totalTimeLabel}</Text>
                 </View>
+                <View style={styles.progressContainerNoCard}>
+                  <Slider
+                    style={styles.progressBar}
+                    minimumValue={0}
+                    maximumValue={durationMillis || 1}
+                    value={seekPosition}
+                    onSlidingStart={() => {
+                      setIsSeeking(true);
+                      bumpControlsLife();
+                    }}
+                    onValueChange={val => {
+                      setSeekPosition(val);
+                      bumpControlsLife();
+                    }}
+                    onSlidingComplete={async val => {
+                      setIsSeeking(false);
+                      await videoRef.current?.setPositionAsync(val);
+                      // Snap captions immediately after a seek.
+                      updateActiveCaption(val, true);
+                      bumpControlsLife();
+                    }}
+                    minimumTrackTintColor="#ff5f6d"
+                    maximumTrackTintColor="rgba(255,255,255,0.2)"
+                    thumbTintColor="#fff"
+                  />
+                </View>
               </View>
-
               {/* Bottom actions */}
               <View style={styles.bottomActions}>
                 <TouchableOpacity
@@ -1607,12 +1756,22 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
                     {`Speed (${playbackRate.toFixed(1)}x)`}
                   </Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity style={styles.bottomButton}>
-                  <MaterialCommunityIcons name="lock-outline" size={18} color="#fff" />
-                  <Text style={styles.bottomText}>Lock</Text>
+                <TouchableOpacity
+                  style={styles.bottomButton}
+                  onPress={() => {
+                    setIsLocked(prev => !prev);
+                    bumpControlsLife();
+                  }}
+                >
+                  <MaterialCommunityIcons
+                    name={isLocked ? "lock" : "lock-outline"}
+                    size={18}
+                    color="#fff"
+                  />
+                  <Text style={styles.bottomText}>
+                    {isLocked ? "Locked" : "Lock"}
+                  </Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity
                   style={[styles.bottomButton, !avControlsEnabled && styles.bottomButtonDisabled]}
                   onPress={() => {
@@ -1631,7 +1790,6 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
             </View>
           </View>
         )}
-
         {activeCaptionText ? (
           <View pointerEvents="none" style={styles.subtitleWrapper}>
             <Text style={styles.subtitleText}>{activeCaptionText}</Text>
@@ -1641,14 +1799,12 @@ const SlidableVerticalControl: React.FC<SlidableVerticalControlProps> = ({
     </View>
   );
 };
-
 const MovieFlixLoader: React.FC<{ message: string; variant?: 'solid' | 'transparent' }> = ({
   message,
   variant = 'solid',
 }) => {
   const scale = useRef(new Animated.Value(0.88)).current;
   const opacity = useRef(new Animated.Value(0.4)).current;
-
   useEffect(() => {
     const animation = Animated.loop(
       Animated.sequence([
@@ -1683,7 +1839,6 @@ const MovieFlixLoader: React.FC<{ message: string; variant?: 'solid' | 'transpar
       animation.stop();
     };
   }, [scale, opacity]);
-
   return (
     <View
       pointerEvents={variant === 'solid' ? 'auto' : 'none'}
@@ -1692,11 +1847,10 @@ const MovieFlixLoader: React.FC<{ message: string; variant?: 'solid' | 'transpar
       <Animated.Text style={[styles.loaderTitle, { transform: [{ scale }], opacity }]}>
         MovieFlix
       </Animated.Text>
-      <Text style={styles.loaderSubtitle}>{message}</Text>
+      {message ? <Text style={styles.loaderSubtitle}>{message}</Text> : null}
     </View>
   );
 };
-
 function parseCaptionPayload(payload: string, type: 'srt' | 'vtt'): CaptionCue[] {
   const sanitized = payload.replace(/\r/g, '').replace('\uFEFF', '');
   const content = type === 'vtt' ? sanitized.replace(/^WEBVTT.*\n/, '') : sanitized;
@@ -1724,7 +1878,6 @@ function parseCaptionPayload(payload: string, type: 'srt' | 'vtt'): CaptionCue[]
   }
   return cues.sort((a, b) => a.start - b.start);
 }
-
 function parseTimestampToMillis(value: string): number {
   const normalized = value.trim().replace(',', '.');
   const parts = normalized.split(':');
@@ -1737,30 +1890,33 @@ function parseTimestampToMillis(value: string): number {
   const hours = parts.length ? parseInt(parts.pop() || '0', 10) : 0;
   return ((hours * 3600 + minutes * 60 + seconds) * 1000) + millis;
 }
-
 function parseHlsAudioTracks(manifest: string): AudioTrackOption[] {
   const lines = manifest.split('\n');
   const options: AudioTrackOption[] = [];
   const regex = /^#EXT-X-MEDIA:TYPE=AUDIO,(.*)$/i;
+
   lines.forEach((rawLine, idx) => {
     const line = rawLine.trim();
     const match = regex.exec(line);
     if (!match) return;
+
     const attrs = parseAttributeDictionary(match[1]);
     const groupId = stripQuotes(attrs['GROUP-ID']);
     const name = stripQuotes(attrs.NAME);
     const language = stripQuotes(attrs.LANGUAGE);
+    const isDefault = attrs.DEFAULT === 'YES';
+
     options.push({
-      id: `${groupId || 'audio'}:${language || idx}`,
+      id: `${groupId || 'audio'}:${language || name || idx}`,
       name,
       language,
       groupId,
-      isDefault: attrs.DEFAULT === 'YES',
+      isDefault,
     });
   });
+
   return options;
 }
-
 function parseHlsQualityOptions(manifest: string, manifestUrl: string): QualityOption[] {
   const lines = manifest.split('\n');
   const options: QualityOption[] = [];
@@ -1799,7 +1955,6 @@ function parseHlsQualityOptions(manifest: string, manifestUrl: string): QualityO
     return 0;
   });
 }
-
 function buildQualityLabel(resolution?: string, bandwidth?: number): string {
   const height = getResolutionHeight(resolution);
   if (height) {
@@ -1810,7 +1965,6 @@ function buildQualityLabel(resolution?: string, bandwidth?: number): string {
   if (bandwidth) return formatBandwidth(bandwidth);
   return 'Variant';
 }
-
 function getResolutionHeight(resolution?: string): number | null {
   if (!resolution) return null;
   const parts = resolution.split('x');
@@ -1818,7 +1972,6 @@ function getResolutionHeight(resolution?: string): number | null {
   const height = parseInt(parts[1], 10);
   return Number.isFinite(height) ? height : null;
 }
-
 function formatBandwidth(bandwidth: number): string {
   if (!Number.isFinite(bandwidth) || bandwidth <= 0) return 'Stream';
   const kbpsValue = bandwidth / 1000;
@@ -1827,7 +1980,6 @@ function formatBandwidth(bandwidth: number): string {
   }
   return `${Math.round(kbpsValue)} kbps`;
 }
-
 function resolveRelativeUrl(target: string, base: string): string {
   try {
     return new URL(target, base).toString();
@@ -1835,7 +1987,6 @@ function resolveRelativeUrl(target: string, base: string): string {
     return target;
   }
 }
-
 async function preloadQualityVariant(uri: string, headers?: Record<string, string>) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
@@ -1857,7 +2008,6 @@ async function preloadQualityVariant(uri: string, headers?: Record<string, strin
     clearTimeout(timeout);
   }
 }
-
 function parseAttributeDictionary(input: string): Record<string, string> {
   const result: Record<string, string> = {};
   let buffer = '';
@@ -1883,12 +2033,10 @@ function parseAttributeDictionary(input: string): Record<string, string> {
   flush();
   return result;
 }
-
 function stripQuotes(value?: string): string | undefined {
   if (!value) return undefined;
   return value.replace(/^"/, '').replace(/"$/, '');
 }
-
 function buildSourceOrder(preferAnime: boolean): string[] {
   const priority = preferAnime ? ANIME_PRIORITY_SOURCE_IDS : GENERAL_PRIORITY_SOURCE_IDS;
   const deprioritized = preferAnime ? GENERAL_PRIORITY_SOURCE_IDS : ANIME_PRIORITY_SOURCE_IDS;
@@ -1905,7 +2053,6 @@ function buildSourceOrder(preferAnime: boolean): string[] {
     return true;
   });
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1946,7 +2093,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.4,
   },
-
   overlay: {
     ...StyleSheet.absoluteFillObject,
     paddingHorizontal: 16,
@@ -1967,7 +2113,6 @@ const styles = StyleSheet.create({
     right: 0,
     height: 180,
   },
-
   // TOP BAR
   topBar: {
     flexDirection: 'row',
@@ -2015,7 +2160,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-
   // MIDDLE
   middleRow: {
     flexDirection: 'row',
@@ -2212,7 +2356,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   // BOTTOM
   bottomControls: {
     width: '100%',
@@ -2236,10 +2379,15 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 32,
   },
+  progressContainerNoCard: {
+    width: '100%',
+    marginTop: 8,
+    paddingHorizontal: 6,
+  },
   progressLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 4,
+    marginBottom: 6,
   },
   timeText: {
     color: 'rgba(255,255,255,0.85)',
@@ -2468,6 +2616,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: 0.5,
   },
+  ccWrapper: {
+  alignItems: 'center',
+},
+ccTrack: {
+  width: 64,
+  borderRadius: 32,
+  backgroundColor: 'rgba(20,22,32,0.85)', // matches glass parent
+  overflow: 'hidden',
+  justifyContent: 'flex-end',
+  borderWidth: 1,
+  borderColor: 'rgba(255,255,255,0.12)',
+},
+ccFill: {
+  width: '100%',
+  backgroundColor: 'rgba(120,130,255,0.35)', // active tint (NOT white)
+},
+ccIconWrap: {
+  position: 'absolute',
+  top: '45%',
+  left: 0,
+  right: 0,
+  alignItems: 'center',
+},
+ccLabel: {
+  marginTop: 10,
+  fontSize: 12,
+  fontWeight: '600',
+  color: 'rgba(255,255,255,0.9)',
+},
 });
+// Add this helper near other helpers (after parseHlsQualityOptions or similar)
 
 export default VideoPlayerScreen;

@@ -29,24 +29,10 @@ export default function SocialFeedLayout() {
             title: 'Notifications'
           }}
         />
-        <Stack.Screen 
+        <Stack.Screen
           name="streaks"
           options={{
             title: 'Streaks'
-          }}
-        />
-        <Stack.Screen
-          name="go-live"
-          options={{
-            presentation: 'modal',
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="live/[id]"
-          options={{
-            presentation: 'modal',
-            headerShown: false,
           }}
         />
       </Stack>

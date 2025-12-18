@@ -16,8 +16,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { firestore } from '@/constants/firebase';
-import { requestAgoraToken } from '@/lib/calls/tokenService';
-import { getAgoraUid } from '@/lib/calls/callService';
+import { sendOffer, sendAnswer, sendIceCandidate } from '@/lib/calls/callService';
 import type {
   CreateLiveStreamOptions,
   LiveStream,
@@ -30,7 +29,8 @@ const normalizeStream = (
   snapshot: DocumentSnapshot<DocumentData>,
 ): LiveStream | null => {
   if (!snapshot.exists()) return null;
-  return { id: snapshot.id, ...(snapshot.data() as LiveStream) };
+  const data = snapshot.data() as LiveStream;
+  return { ...data, id: snapshot.id };
 };
 
 export const listenToLiveStreams = (
@@ -61,8 +61,6 @@ export const createLiveStreamSession = async (
   options: CreateLiveStreamOptions,
 ): Promise<LiveStreamSession> => {
   const channelName = `live-${options.hostId}-${Date.now()}`;
-  const agoraUid = getAgoraUid(options.hostId);
-  const { token } = await requestAgoraToken(channelName, agoraUid, 'publisher');
 
   const docRef = await addDoc(liveStreamsCollection, {
     title: options.title,
@@ -74,13 +72,12 @@ export const createLiveStreamSession = async (
     viewersCount: 0,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
+    signaling: {}, // WebRTC signaling data
   });
 
   return {
     streamId: docRef.id,
     channelName,
-    token,
-    agoraUid,
   };
 };
 
@@ -90,8 +87,6 @@ export const joinLiveStream = async (
 ): Promise<{
   stream: LiveStream;
   channelName: string;
-  token: string;
-  agoraUid: number;
 }> => {
   const streamRef = doc(firestore, 'liveStreams', streamId);
   const snapshot = await getDoc(streamRef);
@@ -104,23 +99,14 @@ export const joinLiveStream = async (
     throw new Error('Live stream is no longer active');
   }
 
-  const agoraUid = getAgoraUid(`${streamId}-${userId}`);
-  const { token } = await requestAgoraToken(
-    stream.channelName,
-    agoraUid,
-    'audience',
-  );
-
   await updateDoc(streamRef, {
     viewersCount: increment(1),
     updatedAt: serverTimestamp(),
   });
 
   return {
-    stream: { id: snapshot.id, ...stream },
+    stream: { ...stream, id: snapshot.id },
     channelName: stream.channelName,
-    token,
-    agoraUid,
   };
 };
 

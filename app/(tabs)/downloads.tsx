@@ -1,17 +1,24 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, TouchableOpacity, Alert } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
-import ScreenWrapper from '../../components/ScreenWrapper';
-import { getAccentFromPosterPath } from '../../constants/theme';
-import { useAccent } from '../components/AccentContext';
-import { DownloadItem } from '../../types';
-import { getProfileScopedKey } from '../../lib/profileStorage';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ScreenWrapper from '../../components/ScreenWrapper';
 import { IMAGE_BASE_URL } from '../../constants/api';
-import { subscribeToDownloadEvents, getActiveDownloads, DownloadEvent } from '../../lib/downloadEvents';
+import { getAccentFromPosterPath } from '../../constants/theme';
+import { DownloadEvent, getActiveDownloads, subscribeToDownloadEvents } from '../../lib/downloadEvents';
+import { getProfileScopedKey } from '../../lib/profileStorage';
+import { DownloadItem } from '../../types';
+import { useAccent } from '../components/AccentContext';
+
+type GroupedDownloads = {
+  type: 'movie' | 'show';
+  title: string;
+  items: DownloadItem[];
+};
 
 const DownloadsScreen = () => {
   const { setAccentColor } = useAccent();
@@ -20,6 +27,7 @@ const DownloadsScreen = () => {
   const [downloads, setDownloads] = useState<DownloadItem[]>([]);
   const [activeDownloads, setActiveDownloads] = useState<DownloadEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (accentColor) {
@@ -141,7 +149,26 @@ const DownloadsScreen = () => {
     [removeDownload]
   );
 
-  const renderDownload = ({ item }: { item: DownloadItem }) => {
+  // --- Group TV shows ---
+  const groupedDownloads: GroupedDownloads[] = [];
+  const showMap = new Map<string, DownloadItem[]>();
+
+  downloads.forEach((item) => {
+    if (item.mediaType === 'tv') {
+      const key = item.title || 'Untitled Show';
+      const arr = showMap.get(key) || [];
+      arr.push(item);
+      showMap.set(key, arr);
+    } else {
+      groupedDownloads.push({ type: 'movie', title: item.title, items: [item] });
+    }
+  });
+
+  showMap.forEach((episodes, title) => {
+    groupedDownloads.push({ type: 'show', title, items: episodes });
+  });
+
+  const renderDownloadItem = (item: DownloadItem) => {
     const subtitleParts = [
       item.mediaType === 'tv' ? 'Episode' : 'Movie',
       item.seasonNumber && item.episodeNumber
@@ -193,6 +220,24 @@ const DownloadsScreen = () => {
     );
   };
 
+  const renderGroup = ({ item }: { item: GroupedDownloads }) => {
+    if (item.type === 'movie') {
+      return renderDownloadItem(item.items[0]);
+    }
+
+    // TV show folder
+    return (
+      <View style={{ marginBottom: 16 }}>
+        <Text style={[styles.headerTitle, { fontSize: 18, marginBottom: 8, color: '#fff' }]}>{item.title}</Text>
+        {item.items.map((episode) => (
+          <View key={episode.id} style={{ marginBottom: 8 }}>
+            {renderDownloadItem(episode)}
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   return (
     <ScreenWrapper>
       <LinearGradient
@@ -214,7 +259,7 @@ const DownloadsScreen = () => {
         style={styles.bgOrbSecondary}
       />
 
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingBottom: 24 + (insets.bottom || 0) + 96 }]}> 
         <View style={styles.headerWrap}>
           <LinearGradient
             colors={['#e50914', '#b20710']}
@@ -243,7 +288,7 @@ const DownloadsScreen = () => {
           </View>
         </View>
 
-        {activeDownloads.length > 0 ? (
+        {activeDownloads.length > 0 && (
           <View style={styles.activeDownloadsCard}>
             <Text style={styles.activeDownloadsTitle}>Active downloads</Text>
             {activeDownloads.map((item) => {
@@ -275,7 +320,7 @@ const DownloadsScreen = () => {
               );
             })}
           </View>
-        ) : null}
+        )}
 
         {downloads.length === 0 ? (
           <View style={styles.glassCard}>
@@ -294,18 +339,20 @@ const DownloadsScreen = () => {
           </View>
         ) : (
           <FlatList
-            data={downloads}
-            keyExtractor={(item) => item.id}
-            renderItem={renderDownload}
+            data={groupedDownloads}
+            keyExtractor={(item, idx) => item.title + idx}
+            renderItem={renderGroup}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.downloadsList}
+            contentContainerStyle={[
+              styles.downloadsList,
+              { paddingBottom: Math.max(120, 40) + (insets.bottom || 0) },
+            ]}
           />
         )}
       </View>
     </ScreenWrapper>
   );
 };
-
 const styles = StyleSheet.create({
   gradient: {
     ...StyleSheet.absoluteFillObject,
@@ -448,6 +495,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  activeDownloadTextBlock: {
+    flex: 1,
+    flexDirection: 'column',
+  },
   activeDownloadName: {
     flex: 1,
     marginRight: 10,
@@ -570,5 +621,6 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
+
 
 export default DownloadsScreen;

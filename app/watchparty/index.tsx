@@ -1,19 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, FlatList, Image } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { useUser } from '../../hooks/use-user';
 import { createWatchParty, tryJoinWatchParty, type WatchParty } from '@/lib/watchparty/controller';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, FlatList, Image, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { IMAGE_BASE_URL } from '../../constants/api';
 import { getAccentFromPosterPath } from '../../constants/theme';
-import type { Media } from '../../types';
-import { useAccent } from '../components/AccentContext';
+import { useUser } from '../../hooks/use-user';
 import { getProfileScopedKey } from '../../lib/profileStorage';
+import { usePStream } from '../../src/pstream/usePStream';
+import type { Media } from '../../types';
 
-const DEFAULT_VIDEO_URL =
-  'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+import { useSubscription } from '../../providers/SubscriptionProvider';
+import { useAccent } from '../components/AccentContext';
+
+
 
 const WatchPartyScreen = () => {
   const router = useRouter();
@@ -23,7 +25,9 @@ const WatchPartyScreen = () => {
   const [myList, setMyList] = useState<Media[]>([]);
   const [selected, setSelected] = useState<Media | null>(null);
   const [currentParty, setCurrentParty] = useState<WatchParty | null>(null);
+  const { scrape: scrapeStream, loading: scrapingStream } = usePStream();
   const { accentColor, setAccentColor } = useAccent();
+  const { isSubscribed } = useSubscription();
   const derivedAccent = useMemo(
     () => getAccentFromPosterPath(selected?.poster_path ?? myList[0]?.poster_path),
     [selected?.poster_path, myList],
@@ -75,9 +79,33 @@ const WatchPartyScreen = () => {
       return;
     }
 
+    // Gating: Only allow more than 4 viewers if subscribed
+    if (!isSubscribed) {
+      Alert.alert(
+        'Upgrade required',
+        'Free watch parties support up to 4 viewers. Upgrade to Premium for larger rooms.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'See Premium', onPress: () => router.push('/premium?source=watchparty') },
+        ]
+      );
+      return;
+    }
+
     try {
       setBusy(true);
-      const videoUrl = DEFAULT_VIDEO_URL; // TODO: map selected to a real playback URL
+      // Build scrape payload for usePStream
+      const payload = {
+        type: 'movie' as const,
+        title: selected.title || selected.name || 'Movie',
+        tmdbId: selected.id ? selected.id.toString() : '',
+        imdbId: selected.imdb_id ?? undefined,
+        releaseYear: selected.release_date ? parseInt(selected.release_date) : new Date().getFullYear(),
+      };
+      const playback = await scrapeStream(payload);
+      if (!playback?.uri) throw new Error('No stream found');
+      const videoUrl = playback.uri;
+      const videoHeaders = playback.headers ? encodeURIComponent(JSON.stringify(playback.headers)) : undefined;
       const party = await createWatchParty(
         user.uid,
         videoUrl,
@@ -98,6 +126,7 @@ const WatchPartyScreen = () => {
                 params: {
                   roomCode: party.code,
                   videoUrl: party.videoUrl,
+                  videoHeaders,
                   title: party.title || selected?.title || selected?.name || 'Watch Party',
                   mediaType: party.mediaType || selected?.media_type || 'movie',
                   tmdbId: selected?.id ? selected.id.toString() : undefined,
@@ -187,7 +216,7 @@ const WatchPartyScreen = () => {
         pointerEvents="none"
       />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/movies')} style={styles.backButton}>
           <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Watch Party</Text>

@@ -67,13 +67,7 @@ export const requestAgoraToken = async (
     return remote;
   }
 
-  if (!AGORA_APP_CERTIFICATE) {
-    // Tokenless mode ƒ?" Caller will join with null token (App Certificate disabled)
-    assertAgoraConfigured();
-    return { token: '' };
-  }
-
   throw new Error(
-    'Unable to create Agora token. Provide EXPO_PUBLIC_AGORA_TOKEN_ENDPOINT or AGORA_APP_CERTIFICATE.',
+    'Unable to create Agora token. Provide EXPO_PUBLIC_AGORA_TOKEN_ENDPOINT and AGORA_APP_CERTIFICATE.',
   );
 };

@@ -1,32 +1,45 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Alert } from 'react-native';
 import {
+  addDoc,
   collection,
+  doc,
   getDocs,
+  increment,
+  limit,
   orderBy,
   query,
-  limit,
-  doc,
-  updateDoc,
-  increment,
-  addDoc,
   serverTimestamp,
+  updateDoc,
+  arrayUnion,
+  arrayRemove,
 } from 'firebase/firestore';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 import { firestore } from '../../../constants/firebase';
 import { supabase, supabaseConfigured } from '../../../constants/supabase';
 import { useUser } from '../../../hooks/use-user';
+import { logInteraction, recommendForFeed } from '../../../lib/algo';
 import type { FeedCardItem, Comment as FeedComment } from '../../../types/social-feed';
 
 export type ReviewItem = FeedCardItem & {
   docId?: string;
   origin?: 'firestore' | 'supabase';
+  likerIds?: string[];
 };
 
 export function useSocialReactions() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const { user } = useUser();
 
   const refreshReviews = useCallback(async () => {
+    setLoading(true);
+    const extractTags = (text?: string): string[] => {
+      if (!text) return [];
+      const matches = Array.from(
+        new Set((text.match(/#[A-Za-z0-9_\-]+/g) || []).map((t) => t.toLowerCase())),
+      );
+      return matches.map((m) => m.replace(/^#/, ''));
+    };
     try {
       let items: ReviewItem[] = [];
 
@@ -43,6 +56,8 @@ export function useSocialReactions() {
             const createdAt = row.created_at ? new Date(row.created_at) : new Date();
             const isVideo = row.media_type === 'video';
             const mediaUrl = row.media_url as string | null;
+            const likerIds = row.likerIds || [];
+            const liked = user?.uid ? likerIds.includes(user.uid) : false;
 
             return {
               id: row.id ?? index + 1,
@@ -53,15 +68,17 @@ export function useSocialReactions() {
               avatar: row.userAvatar || undefined,
               date: createdAt.toLocaleDateString(),
               review: row.review || row.content || '',
+              tags: extractTags(row.review || row.content || ''),
               movie: row.title || row.movie || undefined,
               image: !isVideo && mediaUrl ? { uri: mediaUrl } : undefined,
               genres: row.genres || [],
               likes: row.likes ?? 0,
+              likerIds,
               commentsCount: row.commentsCount ?? row.comments_count ?? 0,
               comments: row.comments || undefined,
               watched: row.watched ?? 0,
               retweet: false,
-              liked: false,
+              liked,
               bookmarked: false,
               videoUrl: isVideo ? mediaUrl || undefined : undefined,
             };
@@ -76,6 +93,7 @@ export function useSocialReactions() {
 
         if (snapshot.empty) {
           setReviews([]);
+          setLoading(false);
           return;
         }
 
@@ -109,6 +127,9 @@ export function useSocialReactions() {
             } catch (err) {
               console.warn('Failed to load comments for review', docSnap.id, err);
             }
+            
+            const likerIds = data.likerIds || [];
+            const liked = user?.uid ? likerIds.includes(user.uid) : false;
 
             return {
               id: docSnap.id,
@@ -119,6 +140,7 @@ export function useSocialReactions() {
               avatar: data.userAvatar || undefined,
               date: createdAt.toLocaleDateString(),
               review: data.review || '',
+              tags: extractTags(data.review || ''),
               movie: data.title || data.movie || undefined,
               image:
                 data.type === 'video'
@@ -128,11 +150,12 @@ export function useSocialReactions() {
                   : undefined,
               genres: data.genres || [],
               likes: data.likes ?? 0,
+              likerIds,
               commentsCount: data.commentsCount ?? (comments ? comments.length : 0),
               comments,
               watched: data.watched ?? 0,
               retweet: false,
-              liked: false,
+              liked,
               bookmarked: false,
               videoUrl: data.videoUrl || (data.type === 'video' ? data.mediaUrl : undefined),
             };
@@ -140,10 +163,17 @@ export function useSocialReactions() {
         );
       }
 
-      setReviews(items);
+      try {
+        const ranked = await recommendForFeed(items, { userId: user?.uid ?? null, friends: [] });
+        setReviews(ranked as ReviewItem[]);
+      } catch (e) {
+        setReviews(items);
+      }
     } catch (error) {
       console.warn('Failed to load social reviews from Firestore', error);
       setReviews([]);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -195,22 +225,30 @@ export function useSocialReactions() {
 
   const handleLike = (id: ReviewItem['id']) => {
     const targetReview = reviews.find((item) => item.id === id);
-    if (!targetReview) return;
+    if (!targetReview || !user?.uid) return;
     const nextLiked = !targetReview.liked;
     const delta = nextLiked ? 1 : -1;
 
     setReviews((prev) =>
       prev.map((item) =>
         item.id === id
-          ? { ...item, liked: nextLiked, likes: Math.max(0, item.likes + delta) }
-          : item,
-      ),
+          ? {
+              ...item,
+              liked: nextLiked,
+              likes: Math.max(0, item.likes + delta),
+              likerIds: nextLiked
+                ? [...(item.likerIds || []), user.uid]
+                : item.likerIds?.filter((uid) => uid !== user.uid) || [],
+            }
+          : item
+      )
     );
 
     if (targetReview.origin === 'firestore' && targetReview.docId) {
       const reviewRef = doc(firestore, 'reviews', targetReview.docId);
       updateDoc(reviewRef, {
         likes: increment(delta),
+        likerIds: nextLiked ? arrayUnion(user.uid) : arrayRemove(user.uid),
         updatedAt: serverTimestamp(),
       }).catch((err) => console.warn('Failed to persist like', err));
 
@@ -226,6 +264,12 @@ export function useSocialReactions() {
           docPath: `reviews/${targetReview.docId}`,
           message: `${actorName} liked your feed${targetReview.movie ? ` about "${targetReview.movie}"` : ''}.`,
         });
+      }
+      // log like to local algo events
+      try {
+        void logInteraction({ type: 'like', actorId: user?.uid ?? null, targetId: id, targetUserId: targetReview.userId ?? null });
+      } catch (e) {
+        /* ignore */
       }
     }
   };
@@ -243,7 +287,7 @@ export function useSocialReactions() {
     const commenter =
       user?.displayName || user?.email?.split('@')[0] || user?.uid || 'You';
 
-    let pendingDoc: { docId: string } | null = null;
+    // prepare optimistic local comment
     const localComment = {
       id: Date.now(),
       user: commenter,
@@ -251,12 +295,13 @@ export function useSocialReactions() {
       spoiler: false,
     };
 
+    // determine pending doc id before mutating state to avoid closure type issues
+    const target = reviews.find((r) => r.id === id);
+    const pendingDocId = target && target.origin === 'firestore' && target.docId ? target.docId : null;
+
     setReviews((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
-        if (item.origin === 'firestore' && item.docId) {
-          pendingDoc = { docId: item.docId };
-        }
         return {
           ...item,
           commentsCount: item.commentsCount + 1,
@@ -265,8 +310,15 @@ export function useSocialReactions() {
       })
     );
 
-    if (pendingDoc) {
-      const reviewRef = doc(firestore, 'reviews', pendingDoc.docId);
+    // log comment
+    try {
+      void logInteraction({ type: 'comment', actorId: user?.uid ?? null, targetId: id, targetUserId: target?.userId ?? null, meta: { snippet: (trimmed || '').slice(0, 120) } });
+    } catch (e) {
+      /* ignore */
+    }
+
+    if (pendingDocId) {
+      const reviewRef = doc(firestore, 'reviews', pendingDocId);
       const commentsRef = collection(reviewRef, 'comments');
       const payload = {
         userId: user?.uid ?? 'anonymous',
@@ -278,11 +330,11 @@ export function useSocialReactions() {
 
       const commentPromise = addDoc(commentsRef, payload).then((commentDoc) => {
         createNotification({
-          targetUid: reviews.find((r) => r.id === id)?.userId,
+          targetUid: target?.userId,
           type: 'comment',
           actorName: commenter,
           actorAvatar: (user as any)?.photoURL ?? null,
-          targetId: pendingDoc!.docId,
+          targetId: pendingDocId,
           docPath: commentDoc.path,
           message: `${commenter} commented on your feed${trimmed ? `: "${trimmed.slice(0, 60)}${trimmed.length > 60 ? '…' : ''}"` : ''}`,
         });
@@ -310,6 +362,7 @@ export function useSocialReactions() {
 
   return {
     reviews,
+    loading,
     setReviews,
     refreshReviews,
     handleLike,

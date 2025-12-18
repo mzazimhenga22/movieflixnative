@@ -8,6 +8,7 @@ import {
   GestureResponderEvent,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
+import { useRouter } from 'expo-router';
 import { Conversation, Profile } from '../controller';
 import { doc, getDoc } from 'firebase/firestore';
 import { firestore } from '../../../constants/firebase';
@@ -23,7 +24,7 @@ interface MessageItemProps {
   onStartCall?: (conversation: Conversation, type: CallType) => void;
   callDisabled?: boolean;
 }
- 
+
 const MessageItem = ({
   item,
   onPress,
@@ -34,25 +35,33 @@ const MessageItem = ({
 }: MessageItemProps) => {
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
   const rowRef = useRef<View | null>(null);
+  const router = useRouter();
   const time = item.updatedAt?.toDate ? item.updatedAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 
   useEffect(() => {
-    if (item.isGroup) {
-      setOtherUser(null);
-      return;
-    }
-    if (Array.isArray(item.members) && currentUser) {
-      const otherUserId = item.members.find((id: string) => id !== currentUser.uid);
-      if (otherUserId) {
-        const userDocRef = doc(firestore, 'users', otherUserId);
-        getDoc(userDocRef).then(doc => {
-          if (doc.exists()) {
-            setOtherUser({ ...doc.data(), id: doc.id } as Profile);
-          }
-        });
+    const fetchOtherUser = async () => {
+      if (item.isGroup) {
+        setOtherUser(null);
+        return;
       }
-    }
-  }, [item.members, currentUser]);
+
+      if (!item.members || !currentUser) return;
+
+      const otherMemberId = item.members.find((memberId: string) => memberId !== currentUser.uid);
+      if (!otherMemberId) return;
+
+      try {
+        const userDoc = await getDoc(doc(firestore, 'users', otherMemberId));
+        if (userDoc.exists()) {
+          setOtherUser({ ...userDoc.data(), id: userDoc.id } as Profile);
+        }
+      } catch (error) {
+        console.error('Error fetching other user:', error);
+      }
+    };
+
+    fetchOtherUser();
+  }, [item.members, currentUser, item.isGroup]);
 
   const handleLongPress = () => {
     if (!onLongPress || !rowRef.current) return;

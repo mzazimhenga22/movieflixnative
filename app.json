@@ -4,7 +4,7 @@
     "slug": "movieflix",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/logo.png",
     "scheme": "movieflix",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -22,9 +22,9 @@
       "package": "com.movieflix.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/logo.png",
+        "backgroundImage": "./assets/images/logo.png",
+        "monochromeImage": "./assets/images/logo.png"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -50,11 +50,12 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "image": "./assets/images/logo.png",
+          "imageWidth": 220,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#1C1C1E",
           "dark": {
+            "image": "./assets/images/logo.png",
             "backgroundColor": "#000000"
           }
         }
@@ -89,8 +90,13 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "fec9b894-ee58-40d6-bae2-b8e839912ee4"
+        "projectId": "150ba453-1c88-455a-89a0-14147bd74e25"
+      },
+      "agora": {
+        "appId": "",
+        "tokenEndpoint": ""
       }
-    }
+    },
+    "owner": "mzazimhengas-organization"
   }
 }

@@ -1,53 +1,119 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import {
-  View,
-  StyleSheet,
-  FlatList,
-  SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
-  LayoutAnimation,
-  UIManager,
-  Text,
-  TouchableOpacity,
-  Image,
-  TextInput,
-  Alert,
-} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  onMessagesUpdate,
-  sendMessage,
-  onConversationUpdate,
-  onAuthChange,
-  Profile,
-  updateConversationStatus,
-  onUserProfileUpdate,
-  setTyping,
-  onUserTyping,
-  deleteMessageForMe,
-  deleteMessageForAll,
-  editMessage,
-  pinMessage,
-  unpinMessage,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  LayoutAnimation,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  UIManager,
+  View,
+} from 'react-native';
+import {
   Conversation,
+  deleteMessageForAll,
+  deleteMessageForMe,
+  editMessage,
+  findOrCreateConversation,
+  getProfileById,
+  markConversationRead,
+  onAuthChange,
+  onConversationUpdate,
+  onMessagesUpdate,
+  onUserProfileUpdate,
+  onUserTyping,
+  pinMessage,
+  Profile,
+  sendMessage,
+  setTyping,
+  unpinMessage,
+  updateConversationStatus,
+  addMessageReaction,
+  removeMessageReaction,
+  forwardMessage,
+  updateMessageStatus,
+  markMessagesDelivered,
+  markMessagesRead,
+  getLastSeen,
 } from '../controller';
 
-import ScreenWrapper from '../../../components/ScreenWrapper';
-import MessageBubble from './components/MessageBubble';
-import ChatHeader from './components/ChatHeader';
-import MessageInput from './components/MessageInput';
-import { LinearGradient } from 'expo-linear-gradient';
-import { getAccentFromPosterPath } from '../../../constants/theme';
-import { Ionicons } from '@expo/vector-icons';
-import { supabase, supabaseConfigured } from '../../../constants/supabase';
-import { decode } from 'base-64';
-import * as FileSystem from 'expo-file-system/legacy';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { Video, ResizeMode } from 'expo-av';
-import { getChatStreak, updateStreakForContext } from '@/lib/streaks/streakManager';
 import { createCallSession } from '@/lib/calls/callService';
 import type { CallType } from '@/lib/calls/types';
+import { getChatStreak, updateStreakForContext } from '@/lib/streaks/streakManager';
+import { Ionicons } from '@expo/vector-icons';
+
+import { ResizeMode, Video } from 'expo-av';
+import * as FileSystem from 'expo-file-system/legacy';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { LinearGradient } from 'expo-linear-gradient';
+import ScreenWrapper from '../../../components/ScreenWrapper';
+import { supabase, supabaseConfigured } from '../../../constants/supabase';
+import { useMessagingSettings } from '@/hooks/useMessagingSettings';
+import ChatHeader from './components/ChatHeader';
+import MessageBubble from './components/MessageBubble';
+import MessageInput from './components/MessageInput';
+
+// Message search functionality
+const MessageSearch = ({ visible, onClose, onSearch, searchResults, onJumpToMessage }: {
+  visible: boolean;
+  onClose: () => void;
+  onSearch: (query: string) => void;
+  searchResults: ChatMessage[];
+  onJumpToMessage: (messageId: string) => void;
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    onSearch(query);
+  };
+
+  if (!visible) return null;
+
+  return (
+    <View style={styles.searchOverlay}>
+      <View style={styles.searchHeader}>
+        <TouchableOpacity onPress={onClose} style={styles.searchCloseBtn}>
+          <Ionicons name="close" size={24} color="#fff" />
+        </TouchableOpacity>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search messages..."
+          placeholderTextColor="rgba(255,255,255,0.6)"
+          value={searchQuery}
+          onChangeText={handleSearch}
+          autoFocus
+        />
+      </View>
+      {searchResults.length > 0 && (
+        <FlatList
+          data={searchResults}
+          keyExtractor={(item) => item.id || `search-${Math.random()}`}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.searchResult}
+              onPress={() => onJumpToMessage(item.id || '')}
+            >
+              <Text style={styles.searchResultText} numberOfLines={2}>
+                {item.text}
+              </Text>
+              <Text style={styles.searchResultTime}>
+                {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ''}
+              </Text>
+            </TouchableOpacity>
+          )}
+          style={styles.searchResults}
+        />
+      )}
+    </View>
+  );
+};
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -64,22 +130,33 @@ type ChatMessage = {
   id?: string;
   text?: string;
   sender?: string;
-  mediaUrl?: string | null;
-  mediaType?: 'image' | 'video' | 'file' | null;
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video' | 'audio' | 'file' | null;
   deleted?: boolean;
   deletedFor?: string[];
   pinnedBy?: string[];
+  clientId?: string | null;
   createdAt?: number;
+  status?: 'sending' | 'sent' | 'delivered' | 'read';
+  reactions?: { [emoji: string]: string[] };
+  forwarded?: boolean;
+  forwardedFrom?: string;
+  replyToMessageId?: string;
+  replyToText?: string;
+  replyToSenderId?: string;
+  replyToSenderName?: string;
   [key: string]: any;
 };
 
 const ChatScreen = () => {
   const { id, fromStreak } = useLocalSearchParams();
   const router = useRouter();
+  const { settings } = useMessagingSettings();
 
   const [user, setUser] = useState<AuthUser | null>(null);
   const [conversation, setConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]); // server-backed messages
+  const [pendingMessages, setPendingMessages] = useState<ChatMessage[]>([]); // optimistic local messages
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
   const [isOtherTyping, setIsOtherTyping] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState<ChatMessage | null>(null);
@@ -91,14 +168,49 @@ const ChatScreen = () => {
   const flatListRef = useRef<FlatList<ChatMessage>>(null);
   const [streakCount, setStreakCount] = useState<number>(0);
   const [isStartingCall, setIsStartingCall] = useState(false);
+  const [lastSeen, setLastSeen] = useState<Date | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ChatMessage[]>([]);
 
   const scrollToBottom = useCallback((animated = true) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     flatListRef.current?.scrollToEnd({ animated });
   }, []);
 
+  const lastMarkedRef = React.useRef<number>(0);
+  const handleScroll = (e: any) => {
+    // If user is near bottom, mark as read (debounced to once per 3s)
+    try {
+      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      const atBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 100;
+      if (atBottom && conversation && user?.uid) {
+        const now = Date.now();
+        if (now - lastMarkedRef.current > 3000) {
+          lastMarkedRef.current = now;
+          if (conversation.lastMessageSenderId && conversation.lastMessageSenderId !== user.uid) {
+            void markConversationRead(id as string, settings.readReceipts);
+          }
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  };
+
   useEffect(() => {
-    const unsubscribeAuth = onAuthChange(setUser);
+    const unsubscribeAuth = onAuthChange((authUser) => {
+      if (!authUser) {
+        setUser(null);
+        return;
+      }
+      setUser({
+        uid: authUser.uid,
+        displayName: (authUser.displayName as string) ?? null,
+        email: (authUser.email as string) ?? null,
+        photoURL: (authUser as any).photoURL ?? null,
+      });
+    });
     const unsubscribeConversation = onConversationUpdate(id as string, setConversation);
     const unsubscribeMessages = onMessagesUpdate(id as string, setMessages);
 
@@ -108,6 +220,62 @@ const ChatScreen = () => {
       unsubscribeMessages();
     };
   }, [id]);
+
+  // Mark conversation read when user opens the chat (if the last message isn't from them)
+  useEffect(() => {
+    if (!conversation || !user?.uid) return;
+    try {
+      if (conversation.lastMessageSenderId && conversation.lastMessageSenderId !== user.uid) {
+        void markConversationRead(id as string, settings.readReceipts);
+      }
+    } catch (err) {
+      console.warn('[chat] failed to mark conversation read on open', err);
+    }
+  }, [conversation, user?.uid, id, settings.readReceipts]);
+
+  // When server messages arrive, remove any pending messages that were echoed back (match on clientId)
+  useEffect(() => {
+    if (!messages || messages.length === 0) return;
+    const serverClientIds = new Set(messages.map((m) => m.clientId).filter(Boolean));
+    if (serverClientIds.size === 0) return;
+    setPendingMessages((prev) => prev.filter((p) => !serverClientIds.has(p.clientId)));
+  }, [messages]);
+
+  // Prevent showing a conversation that the current user is not a member of.
+  // If we detect the user is not in the conversation members, try to create/find
+  // a proper 1:1 conversation with the other participant and redirect there.
+  useEffect(() => {
+    if (!conversation || !user?.uid) return;
+    const members: string[] = Array.isArray(conversation.members) ? conversation.members : [];
+    if (members.includes(user.uid)) return;
+
+    // Not a member — attempt to find the other participant and open a correct convo
+    const otherId = members.length === 2 ? members.find((m: string) => m !== undefined && m !== null) ?? null : null;
+    if (!otherId) {
+      // No valid other participant, navigate back
+      try { router.back(); } catch {};
+      return;
+    }
+
+    (async () => {
+      try {
+        const profile = await getProfileById(otherId);
+        if (!profile) {
+          router.back();
+          return;
+        }
+        const newConvId = await findOrCreateConversation(profile as Profile);
+        if (newConvId && newConvId !== (id as string)) {
+          router.replace(`/messaging/chat/${newConvId}`);
+        } else {
+          router.back();
+        }
+      } catch (err) {
+        console.warn('[chat] failed to migrate conversation for current user', err);
+        try { router.back(); } catch {}
+      }
+    })();
+  }, [conversation, user?.uid, id, router]);
 
   useEffect(() => {
     if (!conversation?.members || !user?.uid) return;
@@ -149,32 +317,34 @@ const ChatScreen = () => {
   }, [messages, scrollToBottom]);
 
   const visibleMessages = useMemo<ChatMessage[]>(() => {
-    if (!user) return messages;
-    return messages.filter((m) => {
+    const server = messages.filter((m) => {
       if (m.deleted) return false;
-      if (Array.isArray(m.deletedFor) && user?.uid && m.deletedFor.includes(user.uid)) {
-        return false;
-      }
+      if (Array.isArray(m.deletedFor) && user?.uid && m.deletedFor.includes(user.uid)) return false;
       return true;
     });
-  }, [messages, user]);
+
+    // Filter out pending messages that have been echoed back by server (match on clientId)
+    const serverClientIds = new Set(server.map((m) => m.clientId).filter(Boolean));
+    const locals = pendingMessages.filter((p) => !serverClientIds.has(p.clientId));
+
+    return [...server, ...locals];
+  }, [messages, pendingMessages, user]);
 
   const mediaMessages = useMemo<ChatMessage[]>(() => {
-    return visibleMessages.filter(
-      (m) => m.mediaUrl && (m.mediaType === 'image' || m.mediaType === 'video'),
-    );
+    return visibleMessages.filter((m) => m.mediaUrl && (m.mediaType === 'image' || m.mediaType === 'video'));
   }, [visibleMessages]);
 
   const pinnedMessage = useMemo<ChatMessage | null>(() => {
     if (!user?.uid) return null;
-    for (let i = messages.length - 1; i >= 0; i -= 1) {
-      const message = messages[i];
+    const combined = [...messages, ...pendingMessages];
+    for (let i = combined.length - 1; i >= 0; i -= 1) {
+      const message = combined[i];
       if (Array.isArray(message.pinnedBy) && message.pinnedBy.includes(user.uid)) {
         return message;
       }
     }
     return null;
-  }, [messages, user?.uid]);
+  }, [messages, pendingMessages, user?.uid]);
 
   const handleStartCall = useCallback(
     async (mode: CallType) => {
@@ -219,7 +389,7 @@ const ChatScreen = () => {
       try {
         const finalUri = uri;
         const base64Data = await FileSystem.readAsStringAsync(finalUri, { encoding: 'base64' });
-        const binary: string = decode(base64Data);
+        const binary: string = atob(base64Data);
         const fileBuffer = Uint8Array.from(binary, (c: string) => c.charCodeAt(0)).buffer;
 
         const rawName = finalUri.split('/').pop() || `chat-${Date.now()}`;
@@ -281,25 +451,39 @@ const ChatScreen = () => {
       setEditingMessage(null);
       setReplyTo(null);
     } else {
-      const newMessage: any = {
-        text: trimmed,
-        sender: user.uid,
-      };
+        const clientId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const tempId = `temp-${clientId}`;
+        const pending: ChatMessage = {
+          id: tempId,
+          text: trimmed,
+          sender: user.uid,
+          createdAt: Date.now(),
+          clientId,
+        };
 
-      if (replyTo) {
-        newMessage.replyToMessageId = replyTo.id;
-        newMessage.replyToText = replyTo.text;
-        newMessage.replyToSenderId = replyTo.sender;
-      }
+        if (replyTo) {
+          (pending as any).replyToMessageId = replyTo.id;
+          (pending as any).replyToText = replyTo.text;
+          (pending as any).replyToSenderId = replyTo.sender;
+        }
 
-      sendMessage(id as string, newMessage);
-      if (fromStreak) {
-        void updateChatStreak();
-      }
+        setPendingMessages((prev) => [...prev, pending]);
+
+        // Fire-and-forget: persist on server with clientId for dedupe
+        try {
+          void sendMessage(id as string, { ...(pending as any), clientId });
+        } catch (err) {
+          // mark pending as failed
+          setPendingMessages((prev) => prev.map((p) => (p.clientId === clientId ? { ...p, failed: true } : p)));
+        }
+
+        if (fromStreak) {
+          void updateChatStreak();
+        }
     }
 
     setReplyTo(null);
-    void setTyping(id as string, user.uid, false);
+    void setTyping(id as string, user.uid, false, settings.typingIndicators);
   };
 
   const handleAcceptRequest = () => {
@@ -313,7 +497,7 @@ const ChatScreen = () => {
 
   const handleTypingChange = (typing: boolean) => {
     if (!user) return;
-    void setTyping(id as string, user.uid, typing);
+    void setTyping(id as string, user.uid, typing, settings.typingIndicators);
   };
 
   const handleMediaPicked = async (uri: string, type: 'image' | 'video') => {
@@ -352,8 +536,25 @@ const ChatScreen = () => {
       mediaUrl: uploaded.url,
       mediaType: uploaded.mediaType,
     };
+    // optimistic pending media message
+    const clientId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const tempId = `temp-${clientId}`;
+    const pending: ChatMessage = {
+      id: tempId,
+      text: newMessage.text,
+      sender: user.uid,
+      mediaUrl: newMessage.mediaUrl,
+      mediaType: newMessage.mediaType,
+      createdAt: Date.now(),
+      clientId,
+    };
+    setPendingMessages((prev) => [...prev, pending]);
 
-    sendMessage(id as string, newMessage);
+    try {
+      void sendMessage(id as string, { ...(newMessage as any), clientId });
+    } catch (err) {
+      setPendingMessages((prev) => prev.map((p) => (p.clientId === clientId ? { ...p, failed: true } : p)));
+    }
     setPendingMedia(null);
     setPendingCaption('');
   };
@@ -381,6 +582,34 @@ const ChatScreen = () => {
     });
   };
 
+  // Search functionality
+  const handleSearchMessages = useCallback((query: string) => {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    const filtered = visibleMessages.filter(message =>
+      message.text?.toLowerCase().includes(query.toLowerCase())
+    );
+    setSearchResults(filtered);
+  }, [visibleMessages]);
+
+  const handleJumpToMessage = useCallback((messageId: string) => {
+    const messageIndex = visibleMessages.findIndex(msg => msg.id === messageId);
+    if (messageIndex >= 0) {
+      flatListRef.current?.scrollToIndex({
+        index: messageIndex,
+        animated: true,
+        viewPosition: 0.5
+      });
+    }
+    setShowSearch(false);
+    setSearchResults([]);
+    setSearchQuery('');
+  }, [visibleMessages]);
+
   const accentColor = '#e50914';
 
   return (
@@ -403,6 +632,8 @@ const ChatScreen = () => {
               conversation={conversation}
               isTyping={isOtherTyping}
               streakCount={streakCount}
+              lastSeen={lastSeen}
+              onSearch={() => setShowSearch(true)}
               onStartVoiceCall={() => handleStartCall('voice')}
               onStartVideoCall={() => handleStartCall('video')}
               callDisabled={isStartingCall}
@@ -436,6 +667,7 @@ const ChatScreen = () => {
               keyExtractor={(item, index) => item.id ?? `message-${index}`}
               contentContainerStyle={styles.messageList}
               showsVerticalScrollIndicator={false}
+              onScroll={handleScroll}
               keyboardShouldPersistTaps="handled"
             />
             <View style={styles.inputContainer}>
@@ -618,6 +850,14 @@ const ChatScreen = () => {
             </KeyboardAvoidingView>
           </View>
         )}
+
+        <MessageSearch
+          visible={showSearch}
+          onClose={() => setShowSearch(false)}
+          onSearch={handleSearchMessages}
+          searchResults={searchResults}
+          onJumpToMessage={handleJumpToMessage}
+        />
       </SafeAreaView>
     </ScreenWrapper>
   );
@@ -823,6 +1063,50 @@ const styles = StyleSheet.create({
     color: '#ff4b4b',
     fontSize: 12,
     fontWeight: '700',
+  },
+  searchOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    zIndex: 70,
+  },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  searchCloseBtn: {
+    padding: 8,
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20,
+  },
+  searchResults: {
+    flex: 1,
+  },
+  searchResult: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  searchResultText: {
+    color: '#fff',
+    fontSize: 15,
+    marginBottom: 4,
+  },
+  searchResultTime: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
   },
 });
 

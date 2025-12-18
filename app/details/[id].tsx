@@ -20,6 +20,8 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { getAccentFromPosterPath } from '../../constants/theme';
 import { getProfileScopedKey } from '../../lib/profileStorage';
+import NewChatSheet from '../messaging/components/NewChatSheet';
+import { Profile, findOrCreateConversation, getFollowing } from '../messaging/controller';
 
 interface Video {
   key: string;
@@ -40,6 +42,8 @@ const MovieDetailsContainer: React.FC = () => {
   const [cast, setCast] = useState<CastMember[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isVideoVisible, setIsVideoVisible] = useState(false);
+  const [isChatSheetVisible, setIsChatSheetVisible] = useState(false);
+  const [following, setFollowing] = useState<Profile[]>([]);
   const accentColor = getAccentFromPosterPath(movie?.poster_path);
 
   useEffect(() => {
@@ -114,29 +118,34 @@ const MovieDetailsContainer: React.FC = () => {
     };
   }, [id, mediaType]);
 
-  const handleWatchTrailer = () => {
-    setIsVideoVisible(true);
-  };
-
-  const handleBack = () => {
-    router.back();
-  };
-
-  const handleAddToMyList = async (movie: Media) => {
-    try {
-      const listKey = await getProfileScopedKey('myList');
-      const myList = await AsyncStorage.getItem(listKey);
-      const list = myList ? JSON.parse(myList) : [];
-      const alreadyInList = list.find((item: Media) => item.id === movie.id);
-      if (!alreadyInList) {
-        list.push(movie);
-        await AsyncStorage.setItem(listKey, JSON.stringify(list));
-        alert('Added to My List');
-      } else {
-        alert('Already in My List');
+  useEffect(() => {
+    const fetchFollowing = async () => {
+      try {
+        const list = await getFollowing();
+        setFollowing(list);
+      } catch (e) {
+        console.error('Error fetching following list:', e);
+        setFollowing([]);
       }
+    };
+    fetchFollowing();
+  }, []);
+
+  const handleOpenChatSheet = () => {
+    setIsChatSheetVisible(true);
+  };
+
+  const handleCloseChatSheet = () => {
+    setIsChatSheetVisible(false);
+  };
+
+  const handleStartChat = async (person: Profile) => {
+    try {
+      const conversationId = await findOrCreateConversation(person);
+      setIsChatSheetVisible(false);
+      router.push({ pathname: '/messaging/chat/[id]', params: { id: conversationId } });
     } catch (error) {
-      console.error('Error adding to My List:', error);
+      console.error('Error starting chat: ', error);
     }
   };
   
@@ -172,6 +181,7 @@ const MovieDetailsContainer: React.FC = () => {
           seasons={seasons}
           mediaType={mediaType}
           cast={cast}
+          onOpenChatSheet={handleOpenChatSheet}
         />
       </ScreenWrapper>
 
@@ -214,6 +224,14 @@ const MovieDetailsContainer: React.FC = () => {
           </View>
         </LinearGradient>
       </Modal>
+
+      <NewChatSheet
+        isVisible={isChatSheetVisible}
+        onClose={handleCloseChatSheet}
+        following={following}
+        onStartChat={handleStartChat}
+        onCreateGroup={() => { /* Not needed for movie details chat for now */ }}
+      />
     </>
   );
 };

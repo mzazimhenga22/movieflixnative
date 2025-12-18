@@ -1,6 +1,6 @@
+import { FontAwesome, MaterialIcons } from '@expo/vector-icons';
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, LayoutAnimation, Platform, UIManager, Image } from 'react-native';
-import { FontAwesome } from '@expo/vector-icons';
+import { ActivityIndicator, Image, LayoutAnimation, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, UIManager, View } from 'react-native';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -26,10 +26,12 @@ interface Season {
 interface EpisodeListProps {
   seasons: Season[];
   onPlayEpisode?: (episode: Episode, season: Season) => void;
+  onDownloadEpisode?: (episode: Episode, season: Season) => void;
   disabled?: boolean;
+  episodeDownloads?: Record<string, { state: 'idle' | 'preparing' | 'downloading' | 'completed' | 'error'; progress: number; error?: string }>;
 }
 
-const EpisodeList: React.FC<EpisodeListProps> = ({ seasons, onPlayEpisode, disabled }) => {
+const EpisodeList: React.FC<EpisodeListProps> = ({ seasons, onPlayEpisode, onDownloadEpisode, disabled, episodeDownloads }) => {
   const [selectedSeason, setSelectedSeason] = useState<Season | null>(seasons.length > 0 ? seasons[0] : null);
 
   const handleSeasonChange = (season: Season) => {
@@ -40,7 +42,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ seasons, onPlayEpisode, disab
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Seasons & Episodes</Text>
-      <View style={styles.dropdownContainer}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dropdownContainer}>
         {seasons.map((season) => (
           <TouchableOpacity
             key={season.id}
@@ -53,7 +55,7 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ seasons, onPlayEpisode, disab
             <Text style={styles.dropdownButtonText}>{season.name}</Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {selectedSeason && (
         <View style={styles.episodeListContainer}>
@@ -69,16 +71,39 @@ const EpisodeList: React.FC<EpisodeListProps> = ({ seasons, onPlayEpisode, disab
                     <Text style={styles.episodeName} numberOfLines={1}>
                       {episode.episode_number}. {episode.name}
                     </Text>
-                    <TouchableOpacity
-                      disabled={disabled}
-                      onPress={() => selectedSeason && onPlayEpisode?.(episode, selectedSeason)}
-                    >
-                      <FontAwesome
-                        name="play-circle"
-                        size={28}
-                        color={disabled ? 'rgba(255,255,255,0.4)' : 'white'}
-                      />
-                    </TouchableOpacity>
+                    <View style={styles.headerActionsRow}>
+                      <TouchableOpacity
+                        disabled={disabled}
+                        onPress={() => selectedSeason && onPlayEpisode?.(episode, selectedSeason)}
+                        style={styles.iconBtn}
+                      >
+                        <FontAwesome
+                          name="play-circle"
+                          size={28}
+                          color={disabled ? 'rgba(255,255,255,0.4)' : 'white'}
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        disabled={disabled || (episodeDownloads?.[String(episode.id)]?.state === 'preparing' || episodeDownloads?.[String(episode.id)]?.state === 'downloading')}
+                        onPress={() => selectedSeason && onDownloadEpisode?.(episode, selectedSeason)}
+                        style={styles.iconBtn}
+                      >
+                        {episodeDownloads?.[String(episode.id)]?.state === 'downloading' || episodeDownloads?.[String(episode.id)]?.state === 'preparing' ? (
+                          <View style={styles.downloadStatusWrap}>
+                            <ActivityIndicator size="small" color="#fff" />
+                            <Text style={styles.downloadProgressText}>
+                              {Math.round((episodeDownloads?.[String(episode.id)]?.progress ?? 0) * 100)}%
+                            </Text>
+                          </View>
+                        ) : (
+                          <MaterialIcons
+                            name="file-download"
+                            size={26}
+                            color={disabled ? 'rgba(255,255,255,0.4)' : 'white'}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   <Text style={styles.episodeOverview} numberOfLines={2}>
                     {episode.overview}
@@ -163,6 +188,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+  },
+  headerActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconBtn: {
+    paddingLeft: 8,
+    paddingRight: 4,
+    paddingVertical: 2,
+  },
+  downloadStatusWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  downloadProgressText: {
+    color: '#fff',
+    fontSize: 12,
+    marginLeft: 6,
   },
   episodeName: {
     color: 'white',

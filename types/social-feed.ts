@@ -31,6 +31,7 @@ export interface Review {
   retweet?: boolean;
   likerAvatars?: ImageSourcePropType[];
   videoUrl?: string;
+  tags?: string[];
 }
 
 // This type is no longer needed as Review now has the correct shape.

@@ -30,7 +30,7 @@ import {
   NOTIFICATION_READ_STATE_PREFIX,
 } from '../../../../constants/notifications';
 
-type KnownNotificationType = 'like' | 'comment' | 'follow' | 'mention' | 'streak' | 'new_release';
+type KnownNotificationType = 'like' | 'comment' | 'follow' | 'mention' | 'streak' | 'new_release' | 'new_post' | 'new_story';
 type NotificationType = KnownNotificationType | (string & {});
 type NotificationScope = 'social' | 'system' | 'content';
 type NotificationFilter = 'all' | 'drops' | 'social';
@@ -65,6 +65,8 @@ const notificationTypeMeta: Record<KnownNotificationType, { label: string; accen
   mention: { label: 'Social', accent: '#a689ff' },
   streak: { label: 'Streak', accent: '#ff6ec7' },
   new_release: { label: 'Premiere', accent: '#5dd39e' },
+  new_post: { label: 'Social', accent: '#ffb347' },
+  new_story: { label: 'Social', accent: '#ffb347' },
 };
 
 const KNOWN_NOTIFICATION_TYPES: KnownNotificationType[] = [
@@ -74,6 +76,8 @@ const KNOWN_NOTIFICATION_TYPES: KnownNotificationType[] = [
   'mention',
   'streak',
   'new_release',
+  'new_post',
+  'new_story',
 ];
 
 const isKnownNotificationType = (value: NotificationType): value is KnownNotificationType =>
@@ -172,6 +176,10 @@ const getSocialMessage = (type: NotificationType, actorName: string, data?: Reco
         : `${actorName} commented${title ? ` on "${title}"` : ''}.`;
     case 'follow':
       return `${actorName} started following you.`;
+    case 'new_post':
+      return `${actorName} created a new post${title ? `: "${truncateText(title)}"` : '.'}`;
+    case 'new_story':
+      return `${actorName} added a new story.`;
     case 'mention':
       return `${actorName} mentioned you${title ? ` in "${title}"` : ''}.`;
     case 'streak':

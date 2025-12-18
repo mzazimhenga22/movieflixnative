@@ -1,15 +1,18 @@
 
 // app/_layout.tsx
-import 'react-native-get-random-values';
 import '@react-native-anywhere/polyfill-base64';
-import 'react-native-url-polyfill/auto';
-import React, { useEffect } from 'react';
-import { Stack, router } from 'expo-router';
-import { CustomThemeProvider } from '../hooks/use-theme';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
+import { Stack, router } from 'expo-router';
+import React, { useEffect } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import 'react-native-get-random-values';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import 'react-native-url-polyfill/auto';
+// URL.parse polyfill for p-stream providers
+import '../polyfills/url';
 import { supabase } from '../constants/supabase';
+import { CustomThemeProvider } from '../hooks/use-theme';
+import { SubscriptionProvider } from '../providers/SubscriptionProvider';
 import { AccentProvider } from './components/AccentContext';
 
 export default function RootLayout() {
@@ -44,6 +47,7 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <CustomThemeProvider>
           <AccentProvider>
+            <SubscriptionProvider>
             <Stack screenOptions={{ headerShown: false }}>
               <Stack.Screen name="index" />
               <Stack.Screen name="select-profile" />
@@ -58,6 +62,7 @@ export default function RootLayout() {
               }}
             />
           </Stack>
+            </SubscriptionProvider>
         </AccentProvider>
       </CustomThemeProvider>
     </SafeAreaProvider>

@@ -11,6 +11,7 @@ export const filemoonScraper = makeEmbed({
   id: 'filemoon',
   name: 'Filemoon',
   rank: 405,
+  flags: [],
   async scrape(ctx) {
     const headers = {
       Accept:
@@ -66,13 +67,8 @@ export const filemoonScraper = makeEmbed({
       stream: [
         {
           id: 'primary',
-          type: 'file',
-          qualities: {
-            unknown: {
-              type: 'mp4',
-              url: videoUrl,
-            },
-          },
+          type: 'hls',
+          playlist: videoUrl,
           headers: {
             Referer: `${new URL(ctx.url).origin}/`,
             'User-Agent': userAgent,

@@ -1,10 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useAccent } from './components/AccentContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useAccent } from './components/AccentContext';
+
+// Add these declarations so the TypeScript compiler recognizes the Firebase helpers
+declare const authPromise: Promise<any> | undefined;
+declare const firestore: any;
+declare function serverTimestamp(): any;
+declare function updateDoc(docRef: any, data: any): Promise<any>;
+declare function doc(firestoreInstance: any, collection: string, id: string): any;
 
 type PlanTier = 'free' | 'plus' | 'premium';
 
@@ -52,7 +59,7 @@ const PLAN_DETAILS: Array<{
   {
     tier: 'free',
     title: 'Starter',
-    price: '$0 / month',
+    price: '0 KSH / month',
     description: 'Keep things simple with one household profile.',
     features: [
       '- 1 household profile',
@@ -63,7 +70,7 @@ const PLAN_DETAILS: Array<{
   {
     tier: 'plus',
     title: 'Household Plus',
-    price: '$9.99 / month',
+    price: '100 KSH / month',
     description: 'Perfect for small households that need a few extra seats.',
     features: [
       '- Up to 3 household profiles',
@@ -74,7 +81,7 @@ const PLAN_DETAILS: Array<{
   {
     tier: 'premium',
     title: 'Watch Party Plus',
-    price: '$X.99 / month',
+    price: '200 KSH / month',
     description: 'Maximum profiles, larger watch parties, and early labs access.',
     features: [
       '- Up to 5 household profiles',
@@ -145,6 +152,26 @@ const PremiumScreen = () => {
         } else {
           await AsyncStorage.setItem('planTierOverride', tier);
         }
+        // Persist plan to Firestore for signed-in users (store non-sensitive summary only)
+        try {
+          const auth = await authPromise;
+          const user = auth.currentUser;
+          if (user) {
+            const priceMap: Record<PlanTier, number> = { free: 0, plus: 100, premium: 200 };
+            const payload: Record<string, any> = {
+              planTier: tier,
+              subscription: {
+                tier,
+                priceKSH: priceMap[tier],
+                updatedAt: serverTimestamp(),
+                source: 'premium-screen',
+              },
+            };
+            await updateDoc(doc(firestore, 'users', user.uid), payload);
+          }
+        } catch (err) {
+          console.warn('[premium] failed to persist plan to Firestore', err);
+        }
         setSelectedPlan(tier);
         const planName = PLAN_LABELS[tier];
         const limitCopy = formatLimit(tier);
@@ -178,7 +205,7 @@ const PremiumScreen = () => {
       />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/movies')} style={styles.backButton}>
           <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Go Premium</Text>

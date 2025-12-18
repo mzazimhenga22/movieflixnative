@@ -1,14 +1,15 @@
-import { firestore } from '../../../constants/firebase';
 import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-  Timestamp,
-  getDocs,
-  deleteDoc,
-  doc,
+    Timestamp,
+    collection,
+    deleteDoc,
+    doc,
+    getDocs,
+    onSnapshot,
+    query,
+    where,
 } from 'firebase/firestore';
+import { firestore } from '../../../constants/firebase';
+import { recommendForStories } from '../../../lib/algo';
 
 const storiesCollection = collection(firestore, 'stories');
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -49,7 +50,14 @@ export const onStoriesUpdate = (callback: (stories: any[]) => void) => {
         const bTime = b?.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
         return aTime - bTime;
       });
-    callback(stories);
+    (async () => {
+      try {
+        const ranked = await recommendForStories(stories, { friends: [] });
+        callback(ranked);
+      } catch (e) {
+        callback(stories);
+      }
+    })();
     ensurePruneScheduled();
   });
 

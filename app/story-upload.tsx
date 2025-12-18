@@ -1,15 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { View, Image, StyleSheet, Platform, Alert, TouchableOpacity, Text, TextInput, ScrollView } from 'react-native';
+import { updateStreakForContext } from '@/lib/streaks/streakManager';
+
+import * as FileSystem from 'expo-file-system/legacy';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { supabase, supabaseConfigured } from '../constants/supabase';
-import { decode } from 'base-64';
-import * as FileSystem from 'expo-file-system/legacy';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import { useUser } from '../hooks/use-user';
-import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, Timestamp, doc, getDoc } from 'firebase/firestore';
+import React, { useEffect, useState } from 'react';
+import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { firestore } from '../constants/firebase';
+import { supabase, supabaseConfigured } from '../constants/supabase';
+import { useUser } from '../hooks/use-user';
 
 export default function StoryUpload() {
   const [image, setImage] = useState<string | null>(null);
@@ -68,16 +69,26 @@ export default function StoryUpload() {
 
       let finalUri = image;
       if (image.startsWith('file://')) {
+        // Copy the image to a temporary location to avoid Android cache issues
+        const tempDir = FileSystem.cacheDirectory + 'temp/';
+        await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true });
+        const tempFileName = `temp-image-${Date.now()}.jpg`;
+        const tempUri = tempDir + tempFileName;
+        await FileSystem.copyAsync({ from: image, to: tempUri });
+
         const manipResult = await manipulateAsync(
-          image,
+          tempUri,
           [{ resize: { width: 900 } }],
           { compress: 0.7, format: SaveFormat.JPEG }
         );
         finalUri = manipResult.uri;
+
+        // Clean up temp file
+        await FileSystem.deleteAsync(tempUri, { idempotent: true });
       }
 
       const base64Data = await FileSystem.readAsStringAsync(finalUri, { encoding: 'base64' });
-      const binary = decode(base64Data);
+      const binary = atob(base64Data);
       const fileBuffer = Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer;
 
       const rawName = finalUri.split('/').pop() || `story-${Date.now()}`;
@@ -96,7 +107,7 @@ export default function StoryUpload() {
 
       const expiresAt = Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000);
 
-      await addDoc(collection(firestore, 'stories'), {
+      const newStoryDoc = await addDoc(collection(firestore, 'stories'), {
         userId: effectiveUser.uid,
         username: (effectiveUser.displayName as string) || 'You',
         photoURL: publicUrl.publicUrl,
@@ -107,6 +118,52 @@ export default function StoryUpload() {
         expiresAt,
       });
 
+      // Notify followers
+      const profileRef = doc(firestore, 'users', effectiveUser.uid);
+      const profileSnap = await getDoc(profileRef);
+      if (profileSnap.exists()) {
+        const followers = profileSnap.data()?.followers || [];
+        for (const followerId of followers) {
+          await addDoc(collection(firestore, 'notifications'), {
+            type: 'new_story',
+            scope: 'social',
+            channel: 'community',
+            actorId: effectiveUser.uid,
+            actorName: (effectiveUser.displayName as string) || 'You',
+            actorAvatar: effectiveUser.photoURL || null,
+            targetUid: followerId,
+            targetId: newStoryDoc.id,
+            docPath: newStoryDoc.path,
+            message: `${(effectiveUser.displayName as string) || 'You'} posted a new story.`,
+            read: false,
+            createdAt: serverTimestamp(),
+          });
+        }
+      }
+
+      // Create a lightweight feed entry so stories show up in the main feed
+      try {
+        await addDoc(collection(firestore, 'reviews'), {
+          userId: effectiveUser.uid,
+          userDisplayName: (effectiveUser.displayName as string) || 'You',
+          userAvatar: effectiveUser.photoURL || null,
+          review: caption || '',
+          mediaUrl: publicUrl.publicUrl,
+          type: 'story',
+          createdAt: serverTimestamp(),
+          likes: 0,
+          commentsCount: 0,
+        });
+      } catch (err) {
+        console.warn('Failed to create feed entry for story', err);
+      }
+
+      // Update local streak state for posting a story
+      try {
+        void updateStreakForContext({ kind: 'story', userId: effectiveUser.uid, username: (effectiveUser.displayName as string) || 'You' });
+      } catch (err) {
+        console.warn('Failed to update streak after story upload', err);
+      }
       Alert.alert('Story posted', 'Your story is now live.');
       router.replace('/social-feed');
     } catch (err: any) {

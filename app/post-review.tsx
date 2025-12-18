@@ -3,7 +3,7 @@ import { View, StyleSheet, Alert } from 'react-native';
 import MediaPicker from './components/post-review/MediaPicker';
 import MediaPreview from './components/post-review/MediaPreview';
 import { supabase, supabaseConfigured } from '../constants/supabase';
-import { decode, encode } from 'base-64';
+
 import * as FileSystem from 'expo-file-system/legacy';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import { useUser } from '../hooks/use-user';
@@ -70,18 +70,28 @@ export default function PostReviewScreen() {
 
       // Optimize images before upload
       if (media.type === 'image' && media.uri.startsWith('file://')) {
+        // Copy the image to a temporary location to avoid Android cache issues
+        const tempDir = FileSystem.cacheDirectory + 'temp/';
+        await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true });
+        const tempFileName = `temp-image-${Date.now()}.jpg`;
+        const tempUri = tempDir + tempFileName;
+        await FileSystem.copyAsync({ from: media.uri, to: tempUri });
+
         const manipResult = await manipulateAsync(
-          media.uri,
+          tempUri,
           [{ resize: { width: 1000 } }],
           { compress: 0.7, format: SaveFormat.JPEG }
         );
         finalUri = manipResult.uri;
+
+        // Clean up temp file
+        await FileSystem.deleteAsync(tempUri, { idempotent: true });
       }
 
       // Read file as Base64 and prepare binary payload for Supabase
       const readLocalFile = async (uri: string) => {
         const base64Data = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-        const binary = decode(base64Data);
+        const binary = atob(base64Data);
         return Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer;
       };
 
@@ -120,7 +130,7 @@ export default function PostReviewScreen() {
 
       // Store review metadata in Firestore so social feed can display it
       try {
-        await addDoc(collection(firestore, 'reviews'), {
+        const newReviewDoc = await addDoc(collection(firestore, 'reviews'), {
           userId: effectiveUser.uid,
           userDisplayName: authorDisplayName,
           userName: authorHandle ?? authorDisplayName,
@@ -135,6 +145,29 @@ export default function PostReviewScreen() {
           likes: 0,
           commentsCount: 0,
         });
+
+        // Notify followers
+        const profileRef = doc(firestore, 'users', effectiveUser.uid);
+        const profileSnap = await getDoc(profileRef);
+        if (profileSnap.exists()) {
+          const followers = profileSnap.data()?.followers || [];
+          for (const followerId of followers) {
+            await addDoc(collection(firestore, 'notifications'), {
+              type: 'new_post',
+              scope: 'social',
+              channel: 'community',
+              actorId: effectiveUser.uid,
+              actorName: authorDisplayName,
+              actorAvatar: authorAvatar,
+              targetUid: followerId,
+              targetId: newReviewDoc.id,
+              docPath: newReviewDoc.path,
+              message: `${authorDisplayName} posted a new review.`,
+              read: false,
+              createdAt: serverTimestamp(),
+            });
+          }
+        }
       } catch (metaError: any) {
         console.warn('Failed to save review metadata to Firestore', metaError);
         Alert.alert('Upload issue', 'Media uploaded but failed to save review details. Please try again.');

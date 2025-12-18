@@ -1,27 +1,32 @@
-import { Feather, MaterialIcons } from '@expo/vector-icons';
-import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  Dimensions,
-  FlatList,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  GestureResponderEvent,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import MaskedView from '@react-native-masked-view/masked-view';
-import type { Comment, FeedCardItem } from '../../../types/social-feed';
 import { updateStreakForContext } from '@/lib/streaks/streakManager';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
+import MaskedView from '@react-native-masked-view/masked-view';
+import { AVPlaybackStatus, ResizeMode, Video } from 'expo-av';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    Animated,
+    Dimensions,
+    FlatList,
+    GestureResponderEvent,
+    Image,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
+import { useActiveProfilePhoto } from '../../../hooks/use-active-profile-photo';
+import { useUser } from '../../../hooks/use-user';
+import type { Comment, FeedCardItem } from '../../../types/social-feed';
+
+type PlanTier = 'free' | 'plus' | 'premium';
 
 type Props = {
   item: FeedCardItem;
@@ -31,34 +36,85 @@ type Props = {
   onShare: (id: FeedCardItem['id']) => void;
   onBookmark: (id: FeedCardItem['id']) => void;
   enableStreaks?: boolean;
+  active?: boolean;
+  currentPlan?: PlanTier;
+};
+
+// if your backend sometimes adds comment avatar fields, this keeps TS happy
+type CommentWithAvatar = Comment & {
+  avatar?: string | null;
+  avatarUrl?: string | null;
 };
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_MAX_HEIGHT = Math.round(SCREEN_HEIGHT * 0.72);
 const MEDIA_HEIGHT = Math.round(SCREEN_HEIGHT * 0.75);
 
-export default function FeedCard({ item, onLike, onComment, onWatch, onShare, onBookmark, enableStreaks }: Props) {
+export default function FeedCard({
+  item,
+  onLike,
+  onComment,
+  onWatch,
+  onShare,
+  onBookmark,
+  enableStreaks,
+  active,
+  currentPlan,
+}: Props) {
+  const { user } = useUser();
+  const activeProfilePhoto = useActiveProfilePhoto();
+
   const [commentsVisible, setCommentsVisible] = useState(false);
-  const [watchVisible, setWatchVisible] = useState(false);
   const [newComment, setNewComment] = useState('');
-  const [spoilerRevealed, setSpoilerRevealed] = useState<Record<number, boolean>>({});
+  const [spoilerRevealed, setSpoilerRevealed] = useState<Record<string, boolean>>({});
+  const [reactionsVisible, setReactionsVisible] = useState(false);
+  const [selectedReaction, setSelectedReaction] = useState<string>('');
+
   const heartAnim = useRef(new Animated.Value(0)).current;
-  const likers = item.likerAvatars?.slice(0, 3) ?? [];
   const lastTapRef = useRef(0);
-  const [heartPosition, setHeartPosition] = useState({ x: MEDIA_HEIGHT / 2, y: MEDIA_HEIGHT / 2 });
+  const tapTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [heartPosition, setHeartPosition] = useState({
+    x: MEDIA_HEIGHT / 2,
+    y: MEDIA_HEIGHT / 2,
+  });
+
   const translateY = useRef(new Animated.Value(SHEET_MAX_HEIGHT)).current;
-  const userInitial = (item.user?.trim()?.charAt(0)?.toUpperCase() || 'W');
 
-  const AvatarBubble = ({ variant }: { variant: 'overlay' | 'default' }) => {
-    const baseStyle = variant === 'overlay' ? styles.avatarOverlay : styles.avatar;
-    if (item.avatar) {
-      return <Image source={{ uri: item.avatar }} style={[baseStyle, styles.avatarImage]} />;
-    }
+  const likers = item.likerAvatars?.slice(0, 3) ?? [];
 
+  const userInitial = useMemo(
+    () => item.user?.trim()?.charAt(0)?.toUpperCase() || 'W',
+    [item.user]
+  );
+
+  // ✅ this matches ProfileScreen intent: check by UID
+  const isOwnItem = !!user?.uid && !!item.userId && user.uid === item.userId;
+
+  const fallbackAvatar =
+    'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&q=80&w=1780&ixlib=rb-4.0.3';
+
+  // ✅ EXACT ProfileScreen priority:
+  // (own item ? activeProfilePhoto : null) || item.avatar || fallbackAvatar
+  const resolveAvatarUri = (avatarFromItem?: string | null) =>
+    (isOwnItem ? activeProfilePhoto : null) || avatarFromItem || fallbackAvatar;
+
+  // AvatarBubble with profile navigation
+  const AvatarBubble = ({ variant = 'default' }: { variant?: 'default' | 'overlay' }) => {
+    const uri = resolveAvatarUri(item.avatar ?? null);
     return (
-      <View style={baseStyle}>
-        <Text style={styles.avatarInitial}>{userInitial}</Text>
-      </View>
+      <TouchableOpacity
+        onPress={() => {
+          if (!item.userId) return;
+          // If already on this profile, do nothing
+          router.push({ pathname: '/profile', params: { userId: item.userId, from: 'social-feed' } } as any);
+        }}
+        accessibilityLabel="View profile"
+        accessibilityRole="button"
+        style={variant === 'overlay' ? styles.avatarOverlay : styles.avatar}
+      >
+        <Image source={{ uri }} style={styles.avatarImage} />
+      </TouchableOpacity>
     );
   };
 
@@ -66,41 +122,39 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
   const videoRef = useRef<Video | null>(null);
   const [videoStatus, setVideoStatus] = useState<AVPlaybackStatus | null>(null);
   const [muted, setMuted] = useState(true);
-
-  // 🔹 Autoplay video when loaded, stop on unmount
-  useEffect(() => {
-    if (!item.videoUrl) return;
-
-      const status = videoStatus as any;
-      if (status?.isLoaded && !status.isPlaying) {
-        videoRef.current?.playAsync?.().catch(() => {});
-      }
-    }, [item.videoUrl, videoStatus]);
+  const hasPlayed = useRef(false);
 
   useEffect(() => {
-    if (commentsVisible || watchVisible) {
+    hasPlayed.current = false;
+    videoRef.current?.pauseAsync();
+  }, [item.videoUrl]);
+
+  useEffect(() => {
+    if (active && item.videoUrl && videoRef.current && !hasPlayed.current) {
+      videoRef.current
+        .playAsync()
+        .then(() => {
+          hasPlayed.current = true;
+        })
+        .catch((e) => console.warn('FeedCard video play error', e));
+    } else if (!active && videoRef.current) {
+      videoRef.current.pauseAsync();
+      hasPlayed.current = false;
+    }
+  }, [active, item.videoUrl]);
+
+  useEffect(() => {
+    if (commentsVisible) {
       Animated.timing(translateY, { toValue: 0, duration: 260, useNativeDriver: true }).start();
     } else {
       Animated.timing(translateY, { toValue: SHEET_MAX_HEIGHT, duration: 200, useNativeDriver: true }).start();
     }
-  }, [commentsVisible, watchVisible, translateY]);
+  }, [commentsVisible, translateY]);
 
   const openComments = useCallback(() => {
     setCommentsVisible(true);
-    if (enableStreaks) {
-      void updateStreakForContext({ kind: 'feed_comment' });
-    }
+    if (enableStreaks) void updateStreakForContext({ kind: 'feed_comment' });
   }, [enableStreaks]);
-
-  const openWatch = useCallback(
-    (id: number) => {
-      try {
-        onWatch(id);
-      } catch {}
-      setWatchVisible(true);
-    },
-    [onWatch]
-  );
 
   const triggerHeart = () => {
     heartAnim.setValue(0);
@@ -114,25 +168,36 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
   const handleDoubleTap = () => {
     onLike(item.id);
     triggerHeart();
-    if (enableStreaks) {
-      void updateStreakForContext({ kind: 'feed_like' });
-    }
+    if (enableStreaks) void updateStreakForContext({ kind: 'feed_like' });
   };
 
   const handleTap = (e: GestureResponderEvent) => {
     const now = Date.now();
+
     if (now - lastTapRef.current < 320) {
+      if (tapTimeout.current) {
+        clearTimeout(tapTimeout.current);
+        tapTimeout.current = null;
+      }
       const { locationX, locationY } = e.nativeEvent;
       setHeartPosition({ x: locationX, y: locationY });
       handleDoubleTap();
+      lastTapRef.current = 0;
+      return;
     }
+
     lastTapRef.current = now;
+    tapTimeout.current = setTimeout(() => {
+      onWatch(item.id);
+      tapTimeout.current = null;
+    }, 320);
   };
 
   const heartScale = heartAnim.interpolate({
     inputRange: [0, 0.4, 1],
     outputRange: [0, 1.15, 0],
   });
+
   const heartOpacity = heartAnim.interpolate({
     inputRange: [0, 0.2, 1],
     outputRange: [0, 1, 0],
@@ -140,7 +205,6 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
 
   const closeSheets = () => {
     setCommentsVisible(false);
-    setWatchVisible(false);
     Keyboard.dismiss();
     setNewComment('');
   };
@@ -157,22 +221,28 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
     Keyboard.dismiss();
   };
 
-  const renderCommentItem = ({ item: c }: { item: Comment }) => {
+  const renderCommentItem = ({ item: c }: { item: CommentWithAvatar }) => {
     const isSpoiler = !!c.spoiler;
-    const revealed = spoilerRevealed[c.id];
+    const revealed = spoilerRevealed[String(c.id)];
+
+    const commentAvatarUri = resolveAvatarUri(c.avatar ?? c.avatarUrl ?? null);
 
     return (
       <View style={styles.commentRow}>
-        <View style={styles.commentAvatar} />
+        <View style={styles.commentAvatar}>
+          <Image source={{ uri: commentAvatarUri }} style={styles.avatarImage} />
+        </View>
+
         <View style={{ flex: 1 }}>
           <Text style={styles.commentUser}>{c.user}</Text>
+
           {isSpoiler && !revealed ? (
             <TouchableOpacity
               style={styles.spoilerPill}
               onPress={() =>
                 setSpoilerRevealed((prev) => ({
                   ...prev,
-                  [c.id]: true,
+                  [String(c.id)]: true,
                 }))
               }
             >
@@ -186,39 +256,66 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
     );
   };
 
+  const router = useRouter();
+  // ...existing code...
   return (
     <View style={styles.card}>
       <View style={styles.cardSheen} />
 
-      {/* 🔹 VIDEO FIRST, FALLBACK TO IMAGE */}
       {item.videoUrl ? (
         <Pressable style={styles.imageWrap} onPress={handleTap}>
-            <Video
-              ref={videoRef}
-              source={{ uri: item.videoUrl }}
-              style={styles.image}
-              resizeMode={ResizeMode.COVER}
-              isLooping
-              isMuted={muted}
-              onPlaybackStatusUpdate={(status) => setVideoStatus(status)}
-              onLoad={async () => {
-                try {
-                  if (videoRef.current) {
-                    await videoRef.current.playAsync();
-                  }
-                } catch (e) {
-                  console.warn('FeedCard video play error', e);
-                }
-              }}
-              onError={(error) => {
-                console.error('FeedCard video error', error);
-                console.log('FeedCard video URL', item.videoUrl);
-              }}
-            />
-          <LinearGradient
-            colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.6)']}
-            style={styles.imageGradient}
+          <Video
+            ref={videoRef}
+            source={{ uri: item.videoUrl }}
+            style={styles.image}
+            resizeMode={ResizeMode.COVER}
+            isLooping
+            isMuted={muted}
+            onPlaybackStatusUpdate={(status) => setVideoStatus(status)}
+            onError={(error) => {
+              console.error('FeedCard video error', error);
+              console.log('FeedCard video URL', item.videoUrl);
+            }}
           />
+
+          <LinearGradient colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.6)']} style={styles.imageGradient} />
+
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.heartBurst,
+              {
+                opacity: heartOpacity,
+                transform: [{ scale: heartScale }],
+                left: heartPosition.x - 48,
+                top: heartPosition.y - 48,
+              },
+            ]}
+          >
+            <MaskedView maskElement={<Feather name="heart" size={96} color="#fff" />}>
+              <LinearGradient
+                colors={['#ff7a45', '#ff2d55']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.heartGradient}
+              />
+            </MaskedView>
+          </Animated.View>
+
+          <View style={styles.imageOverlay}>
+            <AvatarBubble variant="overlay" />
+            <View style={{ flex: 1, paddingLeft: 12 }}>
+              <Text style={styles.userOverlay}>{item.user}</Text>
+              <Text style={styles.reviewOverlay} numberOfLines={2}>
+                {item.review}
+              </Text>
+            </View>
+            <View style={styles.heartCount}>
+              <Feather name="heart" size={18} color="#fff" />
+              <Text style={styles.heartText}>{item.likes}</Text>
+            </View>
+          </View>
+
           <TouchableOpacity style={styles.volumeToggle} onPress={() => setMuted((m) => !m)}>
             <Feather name={muted ? 'volume-x' : 'volume-2'} size={18} color="#fff" />
           </TouchableOpacity>
@@ -226,10 +323,8 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
       ) : item.image ? (
         <Pressable style={styles.imageWrap} onPress={handleTap}>
           <Image source={item.image} style={styles.image} resizeMode="cover" />
-          <LinearGradient
-            colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.7)']}
-            style={styles.imageGradient}
-          />
+          <LinearGradient colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.7)']} style={styles.imageGradient} />
+
           <Animated.View
             pointerEvents="none"
             style={[
@@ -273,59 +368,26 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
           <View style={styles.headerRow}>
             <AvatarBubble variant="default" />
             <View>
-              <Text style={styles.user}>{item.user}</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  if (!item.userId) return;
+                  router.push({ pathname: '/profile', params: { userId: item.userId, from: 'social-feed' } } as any);
+                }}
+                accessibilityLabel="View profile"
+                accessibilityRole="button"
+              >
+                <Text style={styles.user}>{item.user}</Text>
+              </TouchableOpacity>
               <Text style={styles.date}>{item.date}</Text>
-              {item.genres && item.genres.length > 0 && (
-                <View style={styles.genreBadgesRow}>
-                  {item.genres.slice(0, 2).map((g) => (
-                    <View key={g} style={styles.genreBadge}>
-                      <Text style={styles.genreBadgeText}>{g}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
             </View>
           </View>
         )}
 
         {!item.image && !item.videoUrl && <Text style={styles.review}>{item.review}</Text>}
-        {item.movie && !item.image && !item.videoUrl ? (
-          <Text style={styles.movie}>Movie: {item.movie}</Text>
-        ) : null}
-
-        <View style={styles.infoRow}>
-          <View style={styles.infoPill}>
-            <Feather name="clock" size={14} color="#fff" />
-            <Text style={styles.infoText}>2m read</Text>
-          </View>
-          {item.movie ? (
-            <View style={styles.infoPillGhost}>
-              <Feather name="film" size={14} color="#fff" />
-              <Text style={styles.infoText}>{item.movie}</Text>
-            </View>
-          ) : null}
-        </View>
+        {item.movie && !item.image && !item.videoUrl ? <Text style={styles.movie}>Movie: {item.movie}</Text> : null}
 
         <View style={styles.actionsBar}>
           <TouchableOpacity style={styles.actionPill} onPress={() => onLike(item.id)}>
-            {likers.length > 0 && (
-              <View style={styles.likerStack}>
-                {likers.map((src, idx) => (
-                  <Image
-                    key={idx}
-                    source={src}
-                    style={[
-                      styles.likerAvatar,
-                      {
-                        left: idx * 16,
-                        top: -Math.abs(idx - 1) * 3,
-                        zIndex: 10 - idx,
-                      },
-                    ]}
-                  />
-                ))}
-              </View>
-            )}
             <Feather name="heart" size={18} color={item.liked ? '#e50914' : '#fff'} />
             <Text style={styles.actionText}>{item.likes}</Text>
           </TouchableOpacity>
@@ -335,9 +397,34 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
             <Text style={styles.actionText}>{item.commentsCount}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionPill} onPress={() => openWatch(item.id)}>
-            <Feather name="play-circle" size={18} color="#fff" />
-            <Text style={styles.actionText}>Watch</Text>
+          {currentPlan !== 'free' && (
+            <TouchableOpacity
+              style={styles.actionPill}
+              onPress={() => setReactionsVisible(!reactionsVisible)}
+            >
+              <Text style={styles.actionText}>😀</Text>
+              <Text style={styles.actionText}>React</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Chat button for direct messaging */}
+          <TouchableOpacity
+            style={styles.actionPill}
+            onPress={async () => {
+              if (!item.userId) return;
+              const { findOrCreateConversation } = await import('../../messaging/controller');
+              const conversationId = await findOrCreateConversation({
+                id: item.userId,
+                displayName: item.user ?? 'User',
+                photoURL: item.avatar ?? '',
+              });
+              router.push({ pathname: '/messaging/chat/[id]', params: { id: conversationId } } as any);
+            }}
+            accessibilityLabel="Message user"
+            accessibilityRole="button"
+          >
+            <Feather name="message-square" size={18} color="#fff" />
+            <Text style={styles.actionText}>Chat</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.actionPill} onPress={() => onShare(item.id)}>
@@ -353,9 +440,26 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
             />
           </TouchableOpacity>
         </View>
+
+        {reactionsVisible && currentPlan !== 'free' && (
+          <View style={styles.reactionsBar}>
+            {['❤️', '👍', '😄', '😮', '😢', '😡'].map((emoji) => (
+              <TouchableOpacity
+                key={emoji}
+                style={styles.reactionButton}
+                onPress={() => {
+                  // TODO: Add reaction logic
+                  setSelectedReaction(emoji);
+                  setReactionsVisible(false);
+                }}
+              >
+                <Text style={styles.reactionEmoji}>{emoji}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
 
-      {/* COMMENTS BOTTOM SHEET */}
       <Modal visible={commentsVisible} animationType="none" transparent onRequestClose={closeSheets}>
         <Pressable style={styles.modalBackdrop} onPress={closeSheets} />
         <Animated.View style={[styles.sheet, { transform: [{ translateY }], height: SHEET_MAX_HEIGHT }]}>
@@ -363,7 +467,7 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
           <Text style={styles.sheetTitle}>Comments</Text>
 
           <FlatList
-            data={item.comments ?? []}
+            data={(item.comments ?? []) as CommentWithAvatar[]}
             keyExtractor={(c) => String(c.id)}
             renderItem={renderCommentItem}
             contentContainerStyle={{ paddingBottom: 20 }}
@@ -388,36 +492,6 @@ export default function FeedCard({ item, onLike, onComment, onWatch, onShare, on
           </KeyboardAvoidingView>
         </Animated.View>
       </Modal>
-
-      {/* WATCH BOTTOM SHEET */}
-      <Modal visible={watchVisible} animationType="none" transparent onRequestClose={closeSheets}>
-        <Pressable style={styles.modalBackdrop} onPress={closeSheets} />
-        <Animated.View
-          style={[styles.sheet, { transform: [{ translateY }], height: Math.round(SHEET_MAX_HEIGHT * 0.86) }]}
-        >
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Watch Preview</Text>
-
-          <View style={styles.watchPreview}>
-            <View style={styles.videoPlaceholder}>
-              <Text style={{ color: '#fff', fontWeight: '700' }}>Video preview</Text>
-              <TouchableOpacity style={styles.playButton} onPress={() => onWatch(item.id)}>
-                <Feather name="play" size={22} color="#fff" />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.watchDescription} numberOfLines={3}>
-              {item.review ?? 'No description available.'}
-            </Text>
-          </View>
-
-          <View style={{ marginTop: 10 }}>
-            <TouchableOpacity style={styles.watchActionBtn} onPress={() => onWatch(item.id)}>
-              <Text style={styles.watchActionText}>Open Full Player</Text>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </Modal>
     </View>
   );
 }
@@ -438,9 +512,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.16,
         shadowRadius: 24,
       },
-      android: {
-        elevation: 6,
-      },
+      android: { elevation: 6 },
       default: {},
     }),
   },
@@ -453,17 +525,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.16)',
     opacity: 0.3,
   },
-  imageWrap: {
-    height: MEDIA_HEIGHT * 0.75,
-    overflow: 'hidden',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  imageGradient: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  imageWrap: { height: MEDIA_HEIGHT * 0.75, overflow: 'hidden' },
+  image: { width: '100%', height: '100%' },
+  imageGradient: { ...StyleSheet.absoluteFillObject },
   volumeToggle: {
     position: 'absolute',
     right: 14,
@@ -474,13 +538,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
   },
-  heartBurst: {
-    position: 'absolute',
-  },
-  heartGradient: {
-    width: 96,
-    height: 96,
-  },
+  heartBurst: { position: 'absolute' },
+  heartGradient: { width: 96, height: 96 },
+
   imageOverlay: {
     position: 'absolute',
     left: 12,
@@ -489,6 +549,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+
   avatarOverlay: {
     width: 32,
     height: 32,
@@ -496,12 +557,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#e50914',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
     overflow: 'hidden',
   },
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#e50914',
+    marginRight: 10,
+    overflow: 'hidden',
+  },
+  avatarImage: { width: '100%', height: '100%' },
+
   userOverlay: { color: '#fff', fontWeight: '700' },
   reviewOverlay: { color: '#f5f5f5', fontSize: 12, marginTop: 2 },
+
   heartCount: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -511,69 +581,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.55)',
   },
   heartText: { color: '#fff', marginLeft: 6 },
-  content: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: '#e50914',
-    marginRight: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  avatarInitial: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 999,
-  },
+
+  content: { paddingHorizontal: 14, paddingVertical: 10 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   user: { color: '#fff', fontWeight: '700' },
   date: { color: '#999', fontSize: 11, marginTop: 2 },
   review: { color: '#e6e6e6', marginTop: 6 },
   movie: { color: '#bfbfbf', marginTop: 4 },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  infoPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginRight: 8,
-  },
-  infoPillGhost: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-  },
-  infoText: { color: '#fff', fontSize: 11, marginLeft: 4 },
-  actionsBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    marginTop: 10,
-  },
+
+  actionsBar: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 10 },
   actionPill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -585,34 +601,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    position: 'relative',
-    ...Platform.select({
-      ios: {
-        shadowColor: 'rgba(0,0,0,0.18)',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 1,
-        shadowRadius: 6,
-      },
-      android: { elevation: 1 },
-      default: {},
-    }),
   },
   actionText: { color: '#fff', marginLeft: 8 },
-  likerStack: {
-    position: 'absolute',
-    left: -6,
-    top: -18,
-    flexDirection: 'row',
-    height: 26,
-  },
-  likerAvatar: {
-    position: 'absolute',
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.45)',
-  },
+
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' },
   sheet: {
     position: 'absolute',
@@ -625,18 +616,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 10,
     paddingBottom: Platform.OS === 'ios' ? 28 : 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.03)',
-    ...Platform.select({
-      ios: {
-        shadowColor: 'rgba(0,0,0,0.5)',
-        shadowOffset: { width: 0, height: -12 },
-        shadowOpacity: 1,
-        shadowRadius: 24,
-      },
-      android: { elevation: 12 },
-      default: {},
-    }),
   },
   sheetHandle: {
     width: 46,
@@ -647,6 +626,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sheetTitle: { color: '#fff', fontWeight: '800', fontSize: 16, marginBottom: 8 },
+
   commentRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -660,11 +640,11 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: '#e50914',
     marginRight: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
   },
   commentUser: { color: '#fff', fontWeight: '700' },
   commentText: { color: '#d9d9d9', marginTop: 4 },
+
   spoilerPill: {
     marginTop: 4,
     paddingHorizontal: 10,
@@ -674,11 +654,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(229,9,20,0.4)',
   },
-  spoilerText: {
-    color: '#fff',
-    fontWeight: '600',
-    fontSize: 12,
-  },
+  spoilerText: { color: '#fff', fontWeight: '600', fontSize: 12 },
+
   commentInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -687,80 +664,32 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.03)',
   },
   commentInput: { flex: 1, color: '#fff', paddingVertical: 6, paddingHorizontal: 8 },
   sendBtn: { paddingHorizontal: 12, paddingVertical: 6 },
   sendText: { color: '#7dd8ff', fontWeight: '700' },
-  genreBadgesRow: {
+
+  reactionsBar: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginTop: 4,
-    gap: 6,
-  },
-  genreBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  genreBadgeText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  watchPreview: { marginTop: 6 },
-  videoPlaceholder: {
-    height: 200,
-    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
     backgroundColor: 'rgba(255,255,255,0.02)',
+    borderRadius: 12,
+  },
+  reactionButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
-    overflow: 'hidden',
+    marginHorizontal: 4,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.03)',
-    ...Platform.select({
-      ios: {
-        shadowColor: 'rgba(255,90,90,0.08)',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 1,
-        shadowRadius: 18,
-      },
-      android: { elevation: 3 },
-      default: {},
-    }),
+    borderColor: 'rgba(255,255,255,0.1)',
   },
-  playButton: {
-    position: 'absolute',
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(125,216,255,0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    ...Platform.select({
-      ios: {
-        shadowColor: 'rgba(125,216,255,0.16)',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 1,
-        shadowRadius: 18,
-      },
-      android: { elevation: 6 },
-      default: {},
-    }),
+  reactionEmoji: {
+    fontSize: 18,
   },
-  watchDescription: { color: '#cfcfcf', marginTop: 10 },
-  watchActionBtn: {
-    backgroundColor: '#7dd8ff',
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  watchActionText: { color: '#fff', fontWeight: '700' },
 });

@@ -1,19 +1,20 @@
-import React from 'react';
-import { StyleSheet, View, ScrollView, Text, Alert } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Media, CastMember, DownloadItem } from '../../types';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { emitDownloadEvent } from '../../lib/downloadEvents';
+import { ensureDownloadDir, guessFileExtension, persistDownloadRecord } from '../../lib/fileUtils';
+import { downloadHlsPlaylist } from '../../lib/hlsDownloader';
+import { scrapeImdbTrailer } from '../../providers-temp/src/scrapeImdbTrailer';
+import { usePStream } from '../../src/pstream/usePStream';
+
+import { CastMember, Media } from '../../types';
+import CastList from './CastList';
+import EpisodeList from './EpisodeList';
 import MovieHeader from './MovieHeader';
 import MovieInfo from './MovieInfo';
-import TrailerList from './TrailerList';
 import RelatedMovies from './RelatedMovies';
-import EpisodeList from './EpisodeList';
-import CastList from './CastList';
-import { useRouter } from 'expo-router';
-import { getProfileScopedKey } from '../../lib/profileStorage';
-import { usePStream } from '../../src/pstream/usePStream';
-import { downloadHlsPlaylist } from '../../lib/hlsDownloader';
-import { emitDownloadEvent } from '../../lib/downloadEvents';
+import TrailerList from './TrailerList';
 
 interface VideoType {
   key: string;
@@ -29,6 +30,7 @@ interface Props {
   onBack: () => void;
   onSelectRelated: (id: number) => void;
   onAddToMyList: (movie: Media) => void;
+  onOpenChatSheet: () => void;
   seasons: any[];
   mediaType?: string | string[] | undefined;
   cast: CastMember[];
@@ -43,17 +45,51 @@ const MovieDetailsView: React.FC<Props> = ({
   onBack,
   onSelectRelated,
   onAddToMyList,
+  onOpenChatSheet,
   seasons,
   mediaType,
   cast,
 }) => {
+  const [imdbTrailerUrl, setImdbTrailerUrl] = useState<string | null>(null);
+  const [autoPlayed, setAutoPlayed] = useState(false);
+  const autoPlayTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const router = useRouter();
-  const normalizedMediaType: 'movie' | 'tv' =
-    typeof mediaType === 'string' && mediaType === 'tv' ? 'tv' : 'movie';
+  const normalizedMediaType: 'movie' | 'tv' = typeof mediaType === 'string' && mediaType === 'tv' ? 'tv' : 'movie';
   const [isLaunchingPlayer, setIsLaunchingPlayer] = React.useState(false);
   const { scrape: scrapeDownload } = usePStream();
+  // Auto-fetch IMDb trailer and auto-play after a delay
+  useEffect(() => {
+    setImdbTrailerUrl(null);
+    setAutoPlayed(false);
+    if (!movie || !movie.imdb_id) return;
+    let cancelled = false;
+    scrapeImdbTrailer({ imdb_id: movie.imdb_id })
+      .then((url) => {
+        if (!cancelled && url) {
+          setImdbTrailerUrl(url);
+          // Auto-play after 2 seconds if not already played
+          if (!autoPlayed) {
+            autoPlayTimeout.current = setTimeout(() => {
+              setAutoPlayed(true);
+              // You can trigger your video player modal here, or call onWatchTrailer with the direct URL
+              if (url) {
+                // If you have a handler for direct video URLs, use it here
+                // For now, fallback to onWatchTrailer if it accepts a URL
+                if (typeof onWatchTrailer === 'function') onWatchTrailer(url);
+              }
+            }, 2000);
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (autoPlayTimeout.current) clearTimeout(autoPlayTimeout.current);
+    };
+  }, [movie?.imdb_id]);
   const [downloadState, setDownloadState] = React.useState<'idle' | 'preparing' | 'downloading'>('idle');
   const [downloadProgress, setDownloadProgress] = React.useState(0);
+  const [episodeDownloads, setEpisodeDownloads] = React.useState<Record<string, { state: 'idle' | 'preparing' | 'downloading' | 'completed' | 'error'; progress: number; error?: string }>>({});
   const isMountedRef = React.useRef(true);
   const downloadResumableRef = React.useRef<FileSystem.DownloadResumable | null>(null);
   const contentHint = React.useMemo(() => determineContentHint(movie), [movie]);
@@ -78,62 +114,10 @@ const MovieDetailsView: React.FC<Props> = ({
   }, [movie]);
   const derivedGenreIds = React.useMemo(() => {
     if (!movie) return [];
-    if (Array.isArray(movie.genre_ids) && movie.genre_ids.length > 0) {
-      return movie.genre_ids as number[];
-    }
-    const genresArray = Array.isArray((movie as any)?.genres) ? (movie as any).genres : [];
-    return genresArray
-      .map((g: any) => (typeof g?.id === 'number' ? g.id : null))
-      .filter((id: number | null): id is number => typeof id === 'number');
+    if (Array.isArray((movie as any).genre_ids)) return (movie as any).genre_ids;
+    if (Array.isArray((movie as any).genres)) return (movie as any).genres.map((g: any) => g.id).filter(Boolean);
+    return [];
   }, [movie]);
-
-  const ensureDownloadDir = React.useCallback(async () => {
-    if (!FileSystem.documentDirectory) {
-      throw new Error('Storage directory is unavailable on this device.');
-    }
-    const target = `${FileSystem.documentDirectory}downloads`;
-    const info = await FileSystem.getInfoAsync(target);
-    if (!info.exists) {
-      await FileSystem.makeDirectoryAsync(target, { intermediates: true });
-    }
-    return target;
-  }, []);
-
-  const guessFileExtension = React.useCallback((uri: string) => {
-    const sanitized = uri.split('?')[0].split('#')[0];
-    const lastSegment = sanitized.split('/').pop() ?? '';
-    if (lastSegment.includes('.')) {
-      const ext = lastSegment.split('.').pop();
-      if (ext && /^[a-z0-9]{2,5}$/i.test(ext)) {
-        return ext.toLowerCase();
-      }
-    }
-    return 'mp4';
-  }, []);
-
-  const persistDownloadRecord = React.useCallback(async (record: Omit<DownloadItem, 'id'>) => {
-    const key = await getProfileScopedKey('downloads');
-    let existing: DownloadItem[] = [];
-    try {
-      const stored = await AsyncStorage.getItem(key);
-      if (stored) {
-        existing = JSON.parse(stored) as DownloadItem[];
-      }
-    } catch (err) {
-      console.warn('Failed to parse downloads cache', err);
-    }
-    const entry: DownloadItem = {
-      id: `${record.mediaId ?? 'download'}-${Date.now()}`,
-      ...record,
-    };
-    try {
-      await AsyncStorage.setItem(key, JSON.stringify([entry, ...existing]));
-    } catch (err) {
-      console.error('Failed to persist downloads list', err);
-      throw err;
-    }
-    return entry;
-  }, []);
   React.useEffect(() => {
     return () => {
       isMountedRef.current = false;
@@ -152,20 +136,28 @@ const MovieDetailsView: React.FC<Props> = ({
     }
   }, []);
 
+  const setEpisodeDownloadState = React.useCallback((episodeId: string, next: { state: 'idle' | 'preparing' | 'downloading' | 'completed' | 'error'; progress: number; error?: string }) => {
+    setEpisodeDownloads((prev) => ({ ...prev, [episodeId]: next }));
+  }, []);
+
   const buildUpcomingEpisodesPayload = () => {
     if (mediaType !== 'tv' || !Array.isArray(seasons) || seasons.length === 0) {
       return undefined;
     }
-    const upcoming: Array<{
-      id?: number;
-      title?: string;
-      seasonName?: string;
-      episodeNumber?: number;
-      overview?: string;
-      runtime?: number;
-      stillPath?: string | null;
-      seasonEpisodeCount?: number;
-    }> = [];
+const upcoming: Array<{
+  id?: number;
+  title?: string;
+  seasonName?: string;
+  seasonNumber?: number;
+  seasonTmdbId?: number;
+  episodeNumber?: number;
+  episodeTmdbId?: number;
+  overview?: string;
+  runtime?: number;
+  stillPath?: string | null;
+  seasonEpisodeCount?: number;
+}> = [];
+
 
     seasons.forEach((season, idx) => {
       const seasonEpisodes = Array.isArray((season as any)?.episodes) ? (season as any).episodes : [];
@@ -358,6 +350,203 @@ const MovieDetailsView: React.FC<Props> = ({
     });
   };
 
+  const handleDownloadEpisode = async (episode: any, season: any) => {
+    if (!movie || downloadState !== 'idle') return;
+    if (!episode || !season) {
+      Alert.alert('Download unavailable', 'Episode information is missing.');
+      return;
+    }
+
+    const payload = {
+      type: 'show' as const,
+      title: movie.name || movie.title || 'TV Show',
+      tmdbId: movie.id?.toString() ?? '',
+      imdbId: movie.imdb_id ?? undefined,
+      releaseYear: computeReleaseYear() ?? new Date().getFullYear(),
+      season: {
+        number: season.season_number ?? season.seasonNumber ?? 1,
+        tmdbId: season.id?.toString() ?? '',
+        title: season.name ?? `Season ${season.season_number ?? 1}`,
+        episodeCount: Array.isArray(season?.episodes) ? season.episodes.length : undefined,
+      },
+      episode: {
+        number: episode.episode_number ?? 1,
+        tmdbId: episode.id?.toString() ?? '',
+      },
+    };
+
+    const title = payload.title;
+    const sessionId = `${movie.id ?? 'title'}-${payload.season.number}-${payload.episode.number}-${Date.now()}`;
+    const episodeLabel = `S${String(payload.season.number).padStart(2, '0')}E${String(payload.episode.number).padStart(2, '0')}`;
+    const subtitleParts = ['Episode', episodeLabel, runtimeMinutes ? `${runtimeMinutes}m` : null].filter(Boolean);
+    const subtitle = subtitleParts.length ? subtitleParts.join(' • ') : null;
+    const baseEvent = {
+      sessionId,
+      title,
+      mediaId: movie.id ?? undefined,
+      mediaType: normalizedMediaType,
+      subtitle,
+      runtimeMinutes,
+      seasonNumber: payload.season.number,
+      episodeNumber: payload.episode.number,
+    };
+
+    emitDownloadEvent({
+      ...baseEvent,
+      status: 'preparing',
+      progress: 0,
+    });
+
+    let cleanupPath: string | null = null;
+    try {
+      setDownloadStateSafe('preparing');
+      setDownloadProgressSafe(0);
+      const playback = await scrapeDownload(payload, { debugTag: `[download-episode] ${title}` });
+      const downloadsRoot = await ensureDownloadDir();
+
+      const epKey = String(episode.id ?? payload.episode.tmdbId ?? `${payload.season.number}-${payload.episode.number}`);
+
+      if (playback.stream.type === 'hls') {
+        const sessionName = `${movie.id ?? 'title'}-s${payload.season.number}-e${payload.episode.number}-${Date.now()}`;
+        cleanupPath = `${downloadsRoot}/${sessionName}`;
+        setDownloadStateSafe('downloading');
+        setEpisodeDownloadState(epKey, { state: 'preparing', progress: 0 });
+const hlsResult = await downloadHlsPlaylist({
+  playlistUrl: playback.uri,
+  headers: playback.headers,
+  rootDir: downloadsRoot,
+  sessionName,
+  onProgress: (completed, total) => {
+    if (total > 0) {
+      const progress = completed / total;
+      setDownloadProgressSafe(progress);
+      setEpisodeDownloadState(epKey, { state: 'downloading', progress });
+      emitDownloadEvent({
+        ...baseEvent,
+        status: 'downloading',
+        progress,
+      });
+    }
+  },
+});
+
+// Ensure hlsResult is not null before accessing
+if (!hlsResult) throw new Error('HLS download failed or returned null');
+
+await persistDownloadRecord({
+  mediaId: movie.id,
+  title,
+  mediaType: normalizedMediaType,
+  localUri: hlsResult.playlistPath,
+  containerPath: hlsResult.directory,
+  createdAt: Date.now(),
+  bytesWritten: hlsResult.totalBytes,
+  runtimeMinutes,
+  releaseDate: releaseDateValue,
+  posterPath: movie.poster_path,
+  backdropPath: movie.backdrop_path,
+  overview: movie.overview ?? null,
+  seasonNumber: payload.season.number,
+  episodeNumber: payload.episode.number,
+  sourceUrl: playback.uri,
+  downloadType: 'hls',
+  segmentCount: hlsResult.segmentCount,
+});
+
+        setEpisodeDownloadState(epKey, { state: 'completed', progress: 1 });
+        emitDownloadEvent({
+          ...baseEvent,
+          status: 'completed',
+          progress: 1,
+        });
+      } else {
+        const extension = guessFileExtension(playback.uri);
+        const suffix = `s${String(payload.season.number).padStart(2, '0')}e${String(payload.episode.number).padStart(2, '0')}`;
+        const fileName = `${movie.id ?? 'title'}-${suffix}-${Date.now()}.${extension}`;
+        const destination = `${downloadsRoot}/${fileName}`;
+        cleanupPath = destination;
+        setDownloadStateSafe('downloading');
+        setEpisodeDownloadState(epKey, { state: 'preparing', progress: 0 });
+        const resumable = FileSystem.createDownloadResumable(
+          playback.uri,
+          destination,
+          playback.headers ? { headers: playback.headers } : undefined,
+          (progress) => {
+            if (progress.totalBytesExpectedToWrite > 0) {
+              const ratio = progress.totalBytesWritten / progress.totalBytesExpectedToWrite;
+              setDownloadProgressSafe(ratio);
+              setEpisodeDownloadState(epKey, { state: 'downloading', progress: ratio });
+              emitDownloadEvent({
+                ...baseEvent,
+                status: 'downloading',
+                progress: ratio,
+              });
+            }
+          },
+        );
+        downloadResumableRef.current = resumable;
+        const downloadResult = await resumable.downloadAsync();
+        downloadResumableRef.current = null;
+        if (!downloadResult || downloadResult.status >= 400) {
+          throw new Error('Download did not complete. Please try again.');
+        }
+        cleanupPath = null;
+       const fileInfo = await FileSystem.getInfoAsync(destination);
+        await persistDownloadRecord({
+          mediaId: movie.id,
+          title,
+          mediaType: normalizedMediaType,
+          localUri: downloadResult.uri,
+          containerPath: destination,
+          createdAt: Date.now(),
+          bytesWritten: fileInfo.exists ? fileInfo.size : undefined,
+          runtimeMinutes,
+          releaseDate: releaseDateValue,
+          posterPath: movie.poster_path,
+          backdropPath: movie.backdrop_path,
+          overview: movie.overview ?? null,
+          seasonNumber: payload.season.number,
+          episodeNumber: payload.episode.number,
+          sourceUrl: playback.uri,
+          downloadType: 'file',
+        });
+        setEpisodeDownloadState(epKey, { state: 'completed', progress: 1 });
+        emitDownloadEvent({
+          ...baseEvent,
+          status: 'completed',
+          progress: 1,
+        });
+      }
+      setDownloadStateSafe('idle');
+      setDownloadProgressSafe(0);
+      if (isMountedRef.current) {
+        Alert.alert('Download complete', `${title} ${episodeLabel} is now available offline.`, [
+          { text: 'OK', style: 'default' },
+          { text: 'Go to downloads', onPress: () => router.push('/downloads') },
+        ]);
+      }
+    } catch (err: any) {
+      console.error('Episode download failed', err);
+      const epId = payload.episode.tmdbId ?? `${payload.season.number}-${payload.episode.number}`;
+      setEpisodeDownloadState(epId, { state: 'error', progress: 0, error: err?.message ?? String(err) });
+      if (isMountedRef.current) {
+        Alert.alert('Download failed', err?.message || 'Unable to save this episode for offline viewing right now.');
+      }
+      setDownloadStateSafe('idle');
+      setDownloadProgressSafe(0);
+      downloadResumableRef.current = null;
+      if (cleanupPath) {
+        FileSystem.deleteAsync(cleanupPath, { idempotent: true }).catch(() => {});
+      }
+      emitDownloadEvent({
+        ...baseEvent,
+        status: 'error',
+        progress: 0,
+        errorMessage: err?.message || 'Download failed',
+      });
+    }
+  };
+
   const handleDownload = async () => {
     if (!movie || downloadState !== 'idle') return;
     const payload = buildDownloadPayload();
@@ -403,43 +592,47 @@ const MovieDetailsView: React.FC<Props> = ({
         const sessionName = `${movie.id ?? 'title'}-${Date.now()}`;
         cleanupPath = `${downloadsRoot}/${sessionName}`;
         setDownloadStateSafe('downloading');
-        const hlsResult = await downloadHlsPlaylist({
-          playlistUrl: playback.uri,
-          headers: playback.headers,
-          rootDir: downloadsRoot,
-          sessionName,
-          onProgress: (completed, total) => {
-            if (total > 0) {
-              const progress = completed / total;
-              setDownloadProgressSafe(progress);
-              emitDownloadEvent({
-                ...baseEvent,
-                status: 'downloading',
-                progress,
-              });
-            }
-          },
-        });
-        cleanupPath = null;
-        await persistDownloadRecord({
-          mediaId: movie.id,
-          title,
-          mediaType: normalizedMediaType,
-          localUri: hlsResult.playlistPath,
-          containerPath: hlsResult.directory,
-          createdAt: Date.now(),
-          bytesWritten: hlsResult.totalBytes,
-          runtimeMinutes,
-          releaseDate: releaseDateValue,
-          posterPath: movie.poster_path,
-          backdropPath: movie.backdrop_path,
-          overview: movie.overview ?? null,
-          seasonNumber: payload.type === 'show' ? payload.season.number : undefined,
-          episodeNumber: payload.type === 'show' ? payload.episode.number : undefined,
-          sourceUrl: playback.uri,
-          downloadType: 'hls',
-          segmentCount: hlsResult.segmentCount,
-        });
+const hlsResult = await downloadHlsPlaylist({
+  playlistUrl: playback.uri,
+  headers: playback.headers,
+  rootDir: downloadsRoot,
+  sessionName,
+  onProgress: (completed, total) => {
+    if (total > 0) {
+      const progress = completed / total;
+      setDownloadProgressSafe(progress);
+      emitDownloadEvent({
+        ...baseEvent,
+        status: 'downloading',
+        progress,
+      });
+    }
+  },
+});
+
+// Ensure hlsResult is not null
+if (!hlsResult) throw new Error('HLS download failed or returned null');
+
+  await persistDownloadRecord({
+  mediaId: movie.id,
+  title,
+  mediaType: normalizedMediaType,
+  localUri: hlsResult.playlistPath,
+  containerPath: hlsResult.directory,
+  createdAt: Date.now(),
+  bytesWritten: hlsResult.totalBytes,
+  runtimeMinutes,
+  releaseDate: releaseDateValue,
+  posterPath: movie.poster_path,
+  backdropPath: movie.backdrop_path,
+  overview: movie.overview ?? null,
+  seasonNumber: payload.type === 'show' ? payload.season.number : undefined,
+  episodeNumber: payload.type === 'show' ? payload.episode.number : undefined,
+  sourceUrl: playback.uri,
+  downloadType: 'hls',
+  segmentCount: hlsResult.segmentCount,
+});
+
         emitDownloadEvent({
           ...baseEvent,
           status: 'completed',
@@ -478,7 +671,7 @@ const MovieDetailsView: React.FC<Props> = ({
           throw new Error('Download did not complete. Please try again.');
         }
         cleanupPath = null;
-        const fileInfo = await FileSystem.getInfoAsync(destination);
+       const fileInfo = await FileSystem.getInfoAsync(destination); 
         await persistDownloadRecord({
           mediaId: movie.id,
           title,
@@ -486,7 +679,7 @@ const MovieDetailsView: React.FC<Props> = ({
           localUri: downloadResult.uri,
           containerPath: destination,
           createdAt: Date.now(),
-          bytesWritten: fileInfo.size ?? undefined,
+          bytesWritten: fileInfo.exists ? fileInfo.size : undefined,
           runtimeMinutes,
           releaseDate: releaseDateValue,
           posterPath: movie.poster_path,
@@ -551,6 +744,18 @@ const MovieDetailsView: React.FC<Props> = ({
           downloadStatus={downloadState}
           downloadProgress={downloadState === 'downloading' ? downloadProgress : null}
         />
+        {/* Discuss button for movie group chat */}
+        {movie && (
+          <TouchableOpacity
+            style={{ margin: 16, padding: 12, backgroundColor: '#222', borderRadius: 8, alignItems: 'center' }}
+            onPress={onOpenChatSheet}
+
+            accessibilityLabel="Discuss this movie"
+            accessibilityRole="button"
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold' }}>Discuss this Movie</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={[styles.section, styles.sectionFirst]}>
           <MovieInfo movie={movie} isLoading={isLoading} />
@@ -567,7 +772,9 @@ const MovieDetailsView: React.FC<Props> = ({
             <EpisodeList
               seasons={seasons}
               onPlayEpisode={handlePlayEpisode}
+              onDownloadEpisode={handleDownloadEpisode}
               disabled={isLoading || isLaunchingPlayer}
+              episodeDownloads={episodeDownloads}
             />
           </View>
         )}

@@ -1,31 +1,43 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  ActivityIndicator,
-  TouchableOpacity,
-} from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { RtcSurfaceView } from 'react-native-agora';
-import { BlurView } from 'expo-blur';
-import type { User } from 'firebase/auth';
-import { onAuthChange } from '../messaging/controller';
-import {
-  listenToCall,
-  joinCallAsParticipant,
-  markParticipantLeft,
+ import {
   endCall,
+  joinCallAsParticipant,
+  listenToCall,
+  markParticipantLeft,
+  sendAnswer,
+  sendIceCandidate,
+  sendOffer,
   updateParticipantMuteState,
 } from '@/lib/calls/callService';
 import type { CallSession } from '@/lib/calls/types';
-import { getAgoraEngine, destroyAgoraEngine } from '@/lib/calls/agoraClient';
+import {
+  addIceCandidate,
+  closeConnection,
+  createAnswer,
+  createOffer,
+  initializeWebRTC,
+  setIceCandidateCallback,
+  setRemoteDescription,
+  setRemoteStreamCallback,
+  toggleAudio as webrtcToggleAudio,
+  toggleVideo as webrtcToggleVideo
+} from '@/lib/calls/webrtcClient';
+import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import type { User } from 'firebase/auth';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { RTCIceCandidate, RTCSessionDescription, RTCView } from 'react-native-webrtc';
+import { onAuthChange } from '../messaging/controller';
 import CallControls from './components/CallControls';
-
-type AgoraEngine = Awaited<ReturnType<typeof getAgoraEngine>>;
 
 const CallScreen = () => {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -33,16 +45,16 @@ const CallScreen = () => {
 
   const [user, setUser] = useState<User | null>(null);
   const [call, setCall] = useState<CallSession | null>(null);
-  const [remoteUids, setRemoteUids] = useState<number[]>([]);
-  const [localUid, setLocalUid] = useState<number | null>(null);
   const [isJoining, setJoining] = useState(false);
   const [mutedAudio, setMutedAudio] = useState(false);
   const [mutedVideo, setMutedVideo] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isHangingUp, setIsHangingUp] = useState(false);
+  const [localStream, setLocalStream] = useState<any>(null);
+  const [remoteStream, setRemoteStream] = useState<any>(null);
 
-  const engineRef = useRef<AgoraEngine | null>(null);
-  const handlerRef = useRef<any>(null);
+  const peerConnectionRef = useRef<any>(null);
   const hasJoinedRef = useRef(false);
 
   useEffect(() => {
@@ -54,11 +66,55 @@ const CallScreen = () => {
 
   useEffect(() => {
     if (!id) return;
-    const unsubscribe = listenToCall(String(id), (session) => {
+    const unsubscribe = listenToCall(String(id), async (session) => {
       setCall(session);
+
+        // Handle signaling updates
+      if (session?.signaling && peerConnectionRef.current && user?.uid) {
+        const userSignaling = session.signaling[user.uid];
+        if (userSignaling) {
+          // Handle offers from other participants
+          if (userSignaling.offer && session.initiatorId !== user.uid) {
+            try {
+              const offer = new RTCSessionDescription(userSignaling.offer);
+              await setRemoteDescription(offer);
+              const answer = await createAnswer();
+              await sendAnswer(session.id, user.uid, answer);
+            } catch (err) {
+              console.warn('Failed to handle offer', err);
+            }
+          }
+
+          // Handle answers from other participants
+          if (userSignaling.answer && session.initiatorId === user.uid) {
+            try {
+              const answer = new RTCSessionDescription(userSignaling.answer);
+              await setRemoteDescription(answer);
+            } catch (err) {
+              console.warn('Failed to handle answer', err);
+            }
+          }
+
+          // Handle ICE candidates
+          if (userSignaling.iceCandidates) {
+            for (const candidate of userSignaling.iceCandidates) {
+              try {
+                const iceCandidate = new RTCIceCandidate({
+                  candidate: candidate.candidate || '',
+                  sdpMid: candidate.sdpMid || null,
+                  sdpMLineIndex: candidate.sdpMLineIndex || null,
+                });
+                await addIceCandidate(iceCandidate);
+              } catch (err) {
+                console.warn('Failed to add ICE candidate', err);
+              }
+            }
+          }
+        }
+      }
     });
     return () => unsubscribe();
-  }, [id]);
+  }, [id, user?.uid]);
 
   useEffect(() => {
     if (!call) return;
@@ -67,19 +123,10 @@ const CallScreen = () => {
 
   const cleanupConnection = useCallback(
     async (endForAll = false) => {
-      const engine = engineRef.current;
-      if (engine && handlerRef.current) {
-        engine.unregisterEventHandler(handlerRef.current);
-        handlerRef.current = null;
-      }
-      if (engine) {
-        try {
-          await engine.leaveChannel();
-        } catch (err) {
-          console.warn('Failed to leave channel', err);
-        }
-      }
-      engineRef.current = null;
+      closeConnection();
+      setLocalStream(null);
+      setRemoteStream(null);
+      peerConnectionRef.current = null;
       if (call?.id && user?.uid) {
         try {
           await markParticipantLeft(call.id, user.uid);
@@ -95,11 +142,11 @@ const CallScreen = () => {
   );
 
   const handleHangUp = useCallback(async () => {
+    if (isHangingUp) return;
+    setIsHangingUp(true);
     const shouldEndForAll = call?.initiatorId === user?.uid;
     await cleanupConnection(shouldEndForAll);
-    await destroyAgoraEngine();
-    router.back();
-  }, [call?.initiatorId, user?.uid, cleanupConnection, router]);
+  }, [call?.initiatorId, user?.uid, cleanupConnection, isHangingUp]);
 
   useEffect(() => {
     if (!call?.id || !call?.channelName || !call?.type || !user?.uid) return;
@@ -110,36 +157,39 @@ const CallScreen = () => {
     const joinAsync = async () => {
       setJoining(true);
       try {
-        const { token, agoraUid } = await joinCallAsParticipant(
-          call.id,
-          user.uid,
-          user.displayName ?? null,
-        );
-        const engine = await getAgoraEngine(call.type);
-        engineRef.current = engine;
-        const handler = {
-          onJoinChannelSuccess: () => {
-            setLocalUid(agoraUid);
-            setError(null);
-          },
-          onUserJoined: (_channel: string, uid: number) => {
-            setRemoteUids((prev) => (prev.includes(uid) ? prev : [...prev, uid]));
-          },
-          onUserOffline: (_channel: string, uid: number) => {
-            setRemoteUids((prev) => prev.filter((id) => id !== uid));
-          },
-          onLeaveChannel: () => {
-            setRemoteUids([]);
-            setLocalUid(null);
-          },
-        };
-        handlerRef.current = handler;
-        engine.registerEventHandler(handler);
-        await engine.setEnableSpeakerphone(true);
-        await engine.joinChannel(token || null, call.channelName, null, agoraUid);
+        // Join call session
+        await joinCallAsParticipant(call.id, user.uid, user.displayName ?? null);
+
+        // Set up WebRTC callbacks
+        setIceCandidateCallback((candidate: any) => {
+          sendIceCandidate(call.id, user.uid, candidate);
+        });
+
+        setRemoteStreamCallback((stream: any) => {
+          setRemoteStream(stream);
+        });
+
+        // Initialize WebRTC
+        const { peerConnection, localStream: stream } = await initializeWebRTC(call.type);
+        peerConnectionRef.current = peerConnection;
+        setLocalStream(stream);
+
+        // Handle signaling based on role
+        const isInitiator = call.initiatorId === user.uid;
+
+        if (isInitiator) {
+          // Create offer for other participants
+          const offer = await createOffer();
+          await sendOffer(call.id, user.uid, offer);
+        } else {
+          // Listen for offers from other participants
+          // This will be handled by the call listener
+        }
+
+        setError(null);
       } catch (err) {
         if (!cancelled) {
-          console.warn('Failed to join Agora channel', err);
+          console.warn('Failed to join WebRTC call', err);
           setError('Unable to join the call');
         }
       } finally {
@@ -157,53 +207,44 @@ const CallScreen = () => {
   useEffect(() => {
     return () => {
       hasJoinedRef.current = false;
-      cleanupConnection(false).finally(() => destroyAgoraEngine());
+      cleanupConnection(false);
     };
   }, [cleanupConnection]);
 
   useEffect(() => {
-    if (call?.status === 'ended') {
-      handleHangUp();
+    if (call?.status === 'ended' && !isHangingUp) {
+      cleanupConnection(false);
+      router.back();
     }
-  }, [call?.status, handleHangUp]);
+  }, [call?.status, isHangingUp, router, cleanupConnection]);
 
   const toggleAudio = useCallback(async () => {
-    const engine = engineRef.current;
-    if (!engine || !call?.id || !user?.uid) return;
     const next = !mutedAudio;
-    try {
-      await engine.muteLocalAudioStream(next);
+    const success = webrtcToggleAudio();
+    if (success) {
       setMutedAudio(next);
-      await updateParticipantMuteState(call.id, user.uid, { mutedAudio: next });
-    } catch (err) {
-      console.warn('Failed to toggle audio', err);
+      if (call?.id && user?.uid) {
+        await updateParticipantMuteState(call.id, user.uid, { mutedAudio: next });
+      }
     }
   }, [mutedAudio, call?.id, user?.uid]);
 
   const toggleVideo = useCallback(async () => {
     if (call?.type === 'voice') return;
-    const engine = engineRef.current;
-    if (!engine || !call?.id || !user?.uid) return;
     const next = !mutedVideo;
-    try {
-      await engine.muteLocalVideoStream(next);
+    const success = webrtcToggleVideo();
+    if (success) {
       setMutedVideo(next);
-      await updateParticipantMuteState(call.id, user.uid, { mutedVideo: next });
-    } catch (err) {
-      console.warn('Failed to toggle video', err);
+      if (call?.id && user?.uid) {
+        await updateParticipantMuteState(call.id, user.uid, { mutedVideo: next });
+      }
     }
   }, [mutedVideo, call?.id, call?.type, user?.uid]);
 
   const toggleSpeaker = useCallback(async () => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    const next = !speakerOn;
-    try {
-      await engine.setEnableSpeakerphone(next);
-      setSpeakerOn(next);
-    } catch (err) {
-      console.warn('Failed to toggle speaker', err);
-    }
+    // For WebRTC, speaker control is handled by the system
+    // This is a placeholder for future speaker control implementation
+    setSpeakerOn(!speakerOn);
   }, [speakerOn]);
 
   if (!call) {
@@ -232,7 +273,7 @@ const CallScreen = () => {
           <View style={styles.callInfo}>
             <Text style={styles.callTitle}>{call.conversationName ?? 'Call'}</Text>
             <Text style={styles.callSubtitle}>
-              {remoteUids.length > 0 ? 'Connected' : 'Calling…'}
+              {remoteStream ? 'Connected' : 'Calling…'}
             </Text>
           </View>
         </View>
@@ -240,7 +281,7 @@ const CallScreen = () => {
         <View style={styles.body}>
           {call.type === 'video' ? (
             <View style={styles.videoArea}>
-              {remoteUids.length === 0 ? (
+              {!remoteStream ? (
                 <View style={styles.waitingCard}>
                   <BlurView intensity={60} tint="dark" style={styles.waitingBlur}>
                     <Ionicons name="videocam-outline" size={32} color="#fff" />
@@ -248,22 +289,18 @@ const CallScreen = () => {
                   </BlurView>
                 </View>
               ) : (
-                <View style={styles.remoteGrid}>
-                  {remoteUids.map((uid) => (
-                    <RtcSurfaceView
-                      key={`remote-${uid}`}
-                      style={styles.remoteVideo}
-                      canvas={{ uid }}
-                    />
-                  ))}
-                </View>
+                <RTCView
+                  streamURL={remoteStream.toURL()}
+                  style={styles.remoteVideo}
+                  objectFit="cover"
+                />
               )}
-              {localUid !== null && (
+              {localStream && (
                 <View style={styles.localPreview}>
-                  <RtcSurfaceView
+                  <RTCView
+                    streamURL={localStream.toURL()}
                     style={styles.localVideo}
-                    canvas={{ uid: localUid }}
-                    zOrderMediaOverlay
+                    objectFit="cover"
                   />
                   <Text style={styles.previewLabel}>You</Text>
                 </View>
@@ -274,7 +311,7 @@ const CallScreen = () => {
               <Ionicons name="call" size={36} color="#fff" />
               <Text style={styles.voiceTitle}>{call.conversationName ?? 'Voice call'}</Text>
               <Text style={styles.voiceSubtitle}>
-                {remoteUids.length > 0 ? 'Connected' : isJoining ? 'Dialing…' : 'Waiting…'}
+                {remoteStream ? 'Connected' : isJoining ? 'Dialing…' : 'Waiting…'}
               </Text>
             </View>
           )}
